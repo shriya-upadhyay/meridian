@@ -1,0 +1,396 @@
+openapi: 3.0.0
+info:
+  title: Cross-Border Transaction API
+  version: 0.1.0
+  description: REST API for the Cross-Border Transaction DApp on Canton Network
+
+servers:
+  - url: /api
+
+paths:
+  /parties:
+    get:
+      operationId: listParties
+      summary: List all allocated parties
+      tags: [Parties]
+      responses:
+        '200':
+          description: List of parties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Party'
+
+  /proposals:
+    get:
+      operationId: listProposals
+      summary: List proposals visible to the current party
+      tags: [Proposals]
+      parameters:
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: List of proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContractWrapper'
+    post:
+      operationId: createProposal
+      summary: Create a new cross-border transaction proposal
+      tags: [Proposals]
+      parameters:
+        - $ref: '#/components/parameters/partyParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProposalRequest'
+      responses:
+        '201':
+          description: Proposal created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+
+  /proposals/{contractId}/accept:
+    post:
+      operationId: acceptProposal
+      summary: Recipient accepts a proposal
+      tags: [Proposals]
+      parameters:
+        - $ref: '#/components/parameters/contractIdParam'
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: Proposal accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptResult'
+
+  /proposals/{contractId}/withdraw:
+    post:
+      operationId: withdrawProposal
+      summary: Sender withdraws a proposal
+      tags: [Proposals]
+      parameters:
+        - $ref: '#/components/parameters/contractIdParam'
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: Proposal withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+
+  /transactions:
+    get:
+      operationId: listTransactions
+      summary: List CrossBorderTx contracts visible to current party
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContractWrapper'
+
+  /transactions/{contractId}/approve:
+    post:
+      operationId: approveTransaction
+      summary: Regulator approves a transaction
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/contractIdParam'
+        - $ref: '#/components/parameters/partyParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+      responses:
+        '200':
+          description: Transaction approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+
+  /transactions/{contractId}/reject:
+    post:
+      operationId: rejectTransaction
+      summary: Regulator rejects a transaction
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/contractIdParam'
+        - $ref: '#/components/parameters/partyParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+      responses:
+        '200':
+          description: Transaction rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+
+  /transactions/{contractId}/settle:
+    post:
+      operationId: settleTransaction
+      summary: Sender settles an approved transaction
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/contractIdParam'
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: Transaction settled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+
+  /sender-views:
+    get:
+      operationId: listSenderViews
+      summary: List SenderView contracts
+      tags: [Views]
+      parameters:
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: List of sender views
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContractWrapper'
+
+  /recipient-views:
+    get:
+      operationId: listRecipientViews
+      summary: List RecipientView contracts
+      tags: [Views]
+      parameters:
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: List of recipient views
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContractWrapper'
+
+  /regulator-views:
+    get:
+      operationId: listRegulatorViews
+      summary: List RegulatorView contracts
+      tags: [Views]
+      parameters:
+        - $ref: '#/components/parameters/partyParam'
+      responses:
+        '200':
+          description: List of regulator views
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContractWrapper'
+
+  /regulator-views/{contractId}/flag:
+    post:
+      operationId: flagSuspicious
+      summary: Regulator flags a transaction as suspicious
+      tags: [Views]
+      parameters:
+        - $ref: '#/components/parameters/contractIdParam'
+        - $ref: '#/components/parameters/partyParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagRequest'
+      responses:
+        '200':
+          description: Transaction flagged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+
+components:
+  parameters:
+    partyParam:
+      name: party
+      in: query
+      required: true
+      schema:
+        type: string
+      description: The party ID to act as
+    contractIdParam:
+      name: contractId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Party:
+      type: object
+      required: [id, name, role]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [sender, recipient, regulator]
+
+    ContractWrapper:
+      type: object
+      required: [contractId, payload]
+      properties:
+        contractId:
+          type: string
+        templateId:
+          type: string
+        payload:
+          type: object
+
+    CreateProposalRequest:
+      type: object
+      required: [recipient, regulator, txId, senderInfo, recipientInfo, compliance, amount, currency]
+      properties:
+        recipient:
+          type: string
+        regulator:
+          type: string
+        txId:
+          type: string
+        senderInfo:
+          $ref: '#/components/schemas/SenderDetails'
+        recipientInfo:
+          $ref: '#/components/schemas/RecipientDetails'
+        compliance:
+          $ref: '#/components/schemas/ComplianceData'
+        amount:
+          type: string
+        currency:
+          type: string
+          enum: [USD, EUR, GBP, JPY, CHF, SGD, HKD, AED]
+
+    SenderDetails:
+      type: object
+      required: [senderName, senderAccount, senderBankSwift, senderCountry, senderTaxId]
+      properties:
+        senderName:
+          type: string
+        senderAccount:
+          type: string
+        senderBankSwift:
+          type: string
+        senderCountry:
+          type: string
+        senderTaxId:
+          type: string
+
+    RecipientDetails:
+      type: object
+      required: [recipientName, recipientAccount, recipientBankSwift, recipientCountry, recipientTaxId]
+      properties:
+        recipientName:
+          type: string
+        recipientAccount:
+          type: string
+        recipientBankSwift:
+          type: string
+        recipientCountry:
+          type: string
+        recipientTaxId:
+          type: string
+
+    ComplianceData:
+      type: object
+      required: [purposeOfPayment, sourceOfFunds, riskScore, sanctionsChecked, pep_check, amlNotes]
+      properties:
+        purposeOfPayment:
+          type: string
+        sourceOfFunds:
+          type: string
+        riskScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        sanctionsChecked:
+          type: boolean
+        pep_check:
+          type: boolean
+        amlNotes:
+          type: string
+
+    ApproveRequest:
+      type: object
+      required: [senderViewCid, recipientViewCid]
+      properties:
+        senderViewCid:
+          type: string
+        recipientViewCid:
+          type: string
+
+    RejectRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    FlagRequest:
+      type: object
+      required: [notes]
+      properties:
+        notes:
+          type: string
+
+    AcceptResult:
+      type: object
+      properties:
+        txCid:
+          type: string
+        senderViewCid:
+          type: string
+        recipientViewCid:
+          type: string
+        regulatorViewCid:
+          type: string
+
+    CommandResult:
+      type: object
+      properties:
+        status:
+          type: string
+        contractId:
+          type: string

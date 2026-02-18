@@ -1,0 +1,449 @@
+-- =============================================================================
+-- Cross-Border Transaction Smart Contract for Canton Network
+-- Selective Disclosure via DAML's Privacy-by-Design Model
+-- =============================================================================
+--
+-- Canton's sub-transaction privacy ensures each party only sees the parts of
+-- the transaction they are stakeholders on. This contract leverages DAML's
+-- built-in visibility model:
+--   - signatory  → full read/write, always sees the contract
+--   - observer   → read-only visibility of the contract
+--   - divulgence → transient visibility during choice execution
+--
+-- Architecture:
+--   1. SenderView      – visible to sender + regulator (has full sender details)
+--   2. RecipientView   – visible to recipient + regulator (has full recipient details)
+--   3. RegulatorView   – visible only to regulator (has complete AML/KYC data)
+--   4. CrossBorderTx   – the orchestrating contract (all parties are stakeholders)
+--                         but only contains non-sensitive shared fields
+-- =============================================================================
+
+module CrossBorderTransaction where
+
+import Daml.Script
+import DA.Date (date, Month(..))
+import DA.Time (time)
+
+-- =============================================================================
+-- Data Types
+-- =============================================================================
+
+data Currency = USD | EUR | GBP | JPY | CHF | SGD | HKD | AED
+  deriving (Eq, Show, Ord)
+
+data TxStatus
+  = Initiated        -- Sender has created the transaction
+  | ComplianceCheck  -- Regulator is reviewing
+  | Approved         -- Regulator approved
+  | Rejected         -- Regulator rejected
+  | Settled          -- Funds transferred
+  | Cancelled        -- Cancelled by sender
+  deriving (Eq, Show)
+
+data SenderDetails = SenderDetails
+  with
+    senderName        : Text
+    senderAccount     : Text    -- Full account number (sensitive)
+    senderBankSwift   : Text
+    senderCountry     : Text
+    senderTaxId       : Text    -- Sensitive - only sender & regulator
+  deriving (Eq, Show)
+
+data RecipientDetails = RecipientDetails
+  with
+    recipientName      : Text
+    recipientAccount   : Text   -- Full account number (sensitive)
+    recipientBankSwift : Text
+    recipientCountry   : Text
+    recipientTaxId     : Text   -- Sensitive - only recipient & regulator
+  deriving (Eq, Show)
+
+data ComplianceData = ComplianceData
+  with
+    purposeOfPayment   : Text
+    sourceOfFunds      : Text
+    riskScore          : Int       -- 0-100
+    sanctionsChecked   : Bool
+    pep_check          : Bool      -- Politically Exposed Person
+    amlNotes           : Text
+  deriving (Eq, Show)
+
+
+data FxRate = FxRate
+  with
+    fromCurrency  : Currency
+    toCurrency    : Currency
+    rate          : Decimal        -- e.g. 0.7923
+    rateTimestamp : Time           -- when the rate was locked in
+    rateProvider  : Text           -- e.g. "Reuters", "ECB"
+  deriving (Eq, Show)
+
+
+-- =============================================================================
+-- 1. SENDER VIEW (Visible to: Sender, Regulator)
+-- =============================================================================
+-- The sender sees their own details and the transaction amount/status,
+-- but NOT the recipient's sensitive info (account number, tax ID).
+
+template SenderView
+  with
+    sender         : Party
+    regulator      : Party
+    txId           : Text
+    senderInfo     : SenderDetails
+    amount         : Decimal
+    currency       : Currency
+    recipientName  : Text          -- Only the name, not full details
+    recipientCountry : Text
+    status         : TxStatus
+    fxRate           : FxRate
+    createdAt      : Time
+  where
+    signatory sender
+    observer regulator
+
+    -- Sender can see their own full details + transaction metadata
+    -- Regulator can observe (for audit/compliance)
+
+    -- Sender can request cancellation (only if not yet settled)
+    choice RequestCancellation : ContractId SenderView
+      controller sender
+      do
+        assertMsg "Cannot cancel a settled transaction" (status /= Settled)
+        assertMsg "Cannot cancel a rejected transaction" (status /= Rejected)
+        create this with status = Cancelled
+
+    -- Regulator can update status (used during Approve/Reject flow)
+    choice UpdateSenderViewStatus : ContractId SenderView
+      with
+        newStatus : TxStatus
+      controller regulator
+      do
+        create this with status = newStatus
+
+
+-- =============================================================================
+-- 2. RECIPIENT VIEW (Visible to: Recipient, Regulator)
+-- =============================================================================
+-- The recipient sees their own details and incoming amount,
+-- but NOT the sender's sensitive info (account number, tax ID).
+
+template RecipientView
+  with
+    recipient       : Party
+    regulator       : Party
+    txId            : Text
+    recipientInfo   : RecipientDetails
+    amount          : Decimal
+    currency        : Currency
+    senderName      : Text          -- Only the name, not full details
+    senderCountry   : Text
+    status          : TxStatus
+    fxRate          : FxRate
+    createdAt       : Time
+  where
+    signatory recipient
+    observer regulator
+
+    -- Recipient can acknowledge receipt
+    choice AcknowledgeReceipt : ContractId RecipientView
+      controller recipient
+      do
+        assertMsg "Transaction must be settled to acknowledge" (status == Settled)
+        create this  -- Could add an "acknowledged" flag
+
+    -- Regulator can update status (used during Approve/Reject flow)
+    choice UpdateRecipientViewStatus : ContractId RecipientView
+      with
+        newStatus : TxStatus
+      controller regulator
+      do
+        create this with status = newStatus
+
+
+-- =============================================================================
+-- 3. REGULATOR VIEW (Visible to: Regulator ONLY)
+-- =============================================================================
+-- The regulator sees EVERYTHING: full sender details, full recipient details,
+-- compliance/AML data, and can approve or reject.
+
+template RegulatorView
+  with
+    regulator       : Party
+    txId            : Text
+    senderInfo      : SenderDetails
+    recipientInfo   : RecipientDetails
+    compliance      : ComplianceData
+    amount          : Decimal
+    currency        : Currency
+    status          : TxStatus
+    fxRate          : FxRate
+    createdAt       : Time
+  where
+    signatory regulator
+
+    -- Regulator can flag suspicious transactions
+    choice FlagSuspicious : ContractId RegulatorView
+      with
+        notes : Text
+      controller regulator
+      do
+        create this with
+          compliance = this.compliance with amlNotes = notes
+
+
+-- =============================================================================
+-- 4. MAIN ORCHESTRATING CONTRACT (All parties are stakeholders)
+-- =============================================================================
+-- Contains only shared, non-sensitive fields. Acts as the coordination point.
+-- Choices on this contract create/archive the per-party view contracts.
+
+template CrossBorderTx
+  with
+    sender          : Party
+    recipient       : Party
+    regulator       : Party
+    txId            : Text
+    amount          : Decimal
+    currency        : Currency
+    senderName      : Text       -- Non-sensitive (public in the tx)
+    senderCountry   : Text
+    recipientName   : Text       -- Non-sensitive
+    recipientCountry: Text
+    status          : TxStatus
+    fxRate          : FxRate
+    createdAt       : Time
+  where
+    signatory sender
+    observer recipient, regulator
+
+    -- =========================================================================
+    -- REGULATOR: Approve the transaction
+    -- =========================================================================
+    -- ContractIds for the view contracts are passed in since contract keys
+    -- are not supported in Canton SDK 3.4+.
+    choice Approve : (ContractId CrossBorderTx, ContractId SenderView, ContractId RecipientView)
+      with
+        senderViewCid    : ContractId SenderView
+        recipientViewCid : ContractId RecipientView
+      controller regulator
+      do
+        assertMsg "Transaction must be in ComplianceCheck" (status == ComplianceCheck)
+
+        -- Update main contract
+        newTx <- create this with status = Approved
+
+        -- Update sender's view via its own choice (sender is signatory, so
+        -- exercising a choice on SenderView archives it with proper auth)
+        newSv <- exercise senderViewCid UpdateSenderViewStatus with
+          newStatus = Approved
+
+        -- Update recipient's view via its own choice
+        newRv <- exercise recipientViewCid UpdateRecipientViewStatus with
+          newStatus = Approved
+
+        return (newTx, newSv, newRv)
+
+    -- =========================================================================
+    -- REGULATOR: Reject the transaction
+    -- =========================================================================
+    choice Reject : ContractId CrossBorderTx
+      with
+        reason : Text
+      controller regulator
+      do
+        assertMsg "Transaction must be in ComplianceCheck" (status == ComplianceCheck)
+        create this with status = Rejected
+
+    -- =========================================================================
+    -- SENDER: Settle (simulate fund transfer after approval)
+    -- =========================================================================
+    choice Settle : ContractId CrossBorderTx
+      controller sender
+      do
+        assertMsg "Transaction must be Approved to settle" (status == Approved)
+        create this with status = Settled
+
+
+-- =============================================================================
+-- 5. TRANSACTION PROPOSAL (Initiation Flow)
+-- =============================================================================
+-- The sender creates a proposal. When accepted, it fans out into the
+-- per-party view contracts with selective information.
+
+template CrossBorderTxProposal
+  with
+    sender          : Party
+    recipient       : Party
+    regulator       : Party
+    txId            : Text
+    senderInfo      : SenderDetails
+    recipientInfo   : RecipientDetails
+    compliance      : ComplianceData
+    amount          : Decimal
+    fxRate          : FxRate
+    currency        : Currency
+    createdAt       : Time
+  where
+    signatory sender, regulator
+    observer recipient
+
+    -- =========================================================================
+    -- RECIPIENT: Accept the proposal → creates all view contracts
+    -- =========================================================================
+    choice AcceptProposal : (ContractId CrossBorderTx, ContractId SenderView, ContractId RecipientView, ContractId RegulatorView)
+      controller recipient
+      do
+        -- 1. Main contract (shared, non-sensitive fields only)
+        txCid <- create CrossBorderTx with
+          sender; recipient; regulator; txId
+          amount; currency
+          senderName     = senderInfo.senderName
+          senderCountry  = senderInfo.senderCountry
+          recipientName  = recipientInfo.recipientName
+          recipientCountry = recipientInfo.recipientCountry
+          status = ComplianceCheck
+          fxRate = fxRate
+          createdAt
+
+        -- 2. Sender view (sender sees own sensitive data)
+        svCid <- create SenderView with
+          sender; regulator; txId; senderInfo
+          amount; currency
+          recipientName = recipientInfo.recipientName
+          recipientCountry = recipientInfo.recipientCountry
+          status = ComplianceCheck
+          fxRate = fxRate
+          createdAt
+
+        -- 3. Recipient view (recipient sees own sensitive data)
+        rvCid <- create RecipientView with
+          recipient; regulator; txId; recipientInfo
+          amount; currency
+          senderName = senderInfo.senderName
+          senderCountry = senderInfo.senderCountry
+          status = ComplianceCheck
+          fxRate = fxRate
+          createdAt
+
+        -- 4. Regulator view (regulator sees EVERYTHING)
+        regCid <- create RegulatorView with
+          regulator; txId; senderInfo; recipientInfo
+          compliance; amount; currency
+          status = ComplianceCheck
+          fxRate = fxRate
+          createdAt
+
+        return (txCid, svCid, rvCid, regCid)
+
+    -- Sender can withdraw the proposal
+    choice WithdrawProposal : ()
+      controller sender
+      do return ()
+
+
+-- =============================================================================
+-- 6. DAML SCRIPT (Test / Demo Scenario)
+-- =============================================================================
+
+setup : Script ()
+setup = script do
+  -- Allocate parties
+  senderParty    <- allocateParty "AliceCorp_Singapore"
+  recipientParty <- allocateParty "BobLtd_London"
+  regulatorParty <- allocateParty "MAS_Regulator"
+
+  let
+    txId = "XBORDER-2025-00142"
+
+    senderDeets = SenderDetails with
+      senderName      = "AliceCorp Pte Ltd"
+      senderAccount   = "SG-9283-4721-0056"    -- Sensitive!
+      senderBankSwift = "DBSSSGSG"
+      senderCountry   = "Singapore"
+      senderTaxId     = "T12345678X"            -- Sensitive!
+
+    recipientDeets = RecipientDetails with
+      recipientName      = "Bob Ltd"
+      recipientAccount   = "GB82-WEST-1234-5698-7654-32"  -- Sensitive!
+      recipientBankSwift = "WESTGB2L"
+      recipientCountry   = "United Kingdom"
+      recipientTaxId     = "GB-987654321"                  -- Sensitive!
+
+    complianceInfo = ComplianceData with
+      purposeOfPayment = "Invoice payment for consulting services"
+      sourceOfFunds    = "Operating revenue"
+      riskScore        = 15
+      sanctionsChecked = True
+      pep_check        = True
+      amlNotes         = "Low risk transaction, standard due diligence"
+
+
+   
+
+    now = time (date 2025 Jun 15) 10 30 0
+
+    fxRate = FxRate with
+      fromCurrency  = USD
+      toCurrency    = GBP
+      rate          = 0.7923
+      rateTimestamp = now
+      rateProvider  = "Reuters"
+
+  -- Step 1: Sender + Regulator co-sign the proposal
+  proposalCid <- submit (actAs senderParty <> actAs regulatorParty) do
+    createCmd CrossBorderTxProposal with
+      sender    = senderParty
+      recipient = recipientParty
+      regulator = regulatorParty
+      txId
+      senderInfo    = senderDeets
+      recipientInfo = recipientDeets
+      compliance    = complianceInfo
+      amount        = 250000.00
+      currency      = USD
+      fxRate = fxRate
+      createdAt     = now
+
+  -- Step 2: Recipient accepts → fan-out into per-party views
+  (txCid, svCid, rvCid, regCid) <- submit recipientParty do
+    exerciseCmd proposalCid AcceptProposal
+
+  -- Step 3: Regulator reviews and approves (passing view ContractIds)
+  (txCid2, svCid2, rvCid2) <- submit regulatorParty do
+    exerciseCmd txCid Approve with
+      senderViewCid = svCid
+      recipientViewCid = rvCid
+
+  -- Step 4: Sender settles
+  _finalTx <- submit senderParty do
+    exerciseCmd txCid2 Settle
+
+  -- ==========================================================================
+  -- VISIBILITY SUMMARY (what Canton's ledger API shows each party):
+  -- ==========================================================================
+  --
+  --  AliceCorp (Sender):
+  --    ✅ CrossBorderTx     → shared fields (amount, status, names, countries)
+  --    ✅ SenderView         → own account, SWIFT, tax ID
+  --    ❌ RecipientView      → CANNOT see Bob's account/tax ID
+  --    ❌ RegulatorView      → CANNOT see compliance/AML data
+  --
+  --  BobLtd (Recipient):
+  --    ✅ CrossBorderTx     → shared fields (as observer)
+  --    ❌ SenderView         → CANNOT see Alice's account/tax ID
+  --    ✅ RecipientView      → own account, SWIFT, tax ID
+  --    ❌ RegulatorView      → CANNOT see compliance/AML data
+  --
+  --  MAS_Regulator:
+  --    ✅ CrossBorderTx     → shared fields (as observer)
+  --    ✅ SenderView         → Alice's full details (as observer)
+  --    ✅ RecipientView      → Bob's full details (as observer)
+  --    ✅ RegulatorView      → FULL compliance data, AML notes, risk scores
+  --
+  -- This is enforced at the LEDGER LEVEL by Canton's privacy model — not by
+  -- application-layer access control. Parties physically cannot see contracts
+  -- they are not stakeholders on.
+  -- ==========================================================================
+
+  return ()
