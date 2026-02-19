@@ -24,14 +24,17 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
   }
 
   const payload = transaction.payload as any;
-  const compliance = payload?.compliance || {};
-  const sender = payload?.senderDetails || {};
-  const recipient = payload?.recipientDetails || {};
+
+  // The RegulatorView has both declaration (sender-provided) and screening (regulator-produced)
+  const declaration = payload?.declaration || {};
+  const screening = payload?.screening || {};
+  const sender = payload?.senderInfo || {};
+  const recipient = payload?.recipientInfo || {};
 
   const riskColor =
-    compliance.riskScore > 70
+    screening.riskScore > 70
       ? "danger"
-      : compliance.riskScore > 40
+      : screening.riskScore > 40
       ? "warning"
       : "success";
 
@@ -89,27 +92,48 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
 
           <hr />
 
-          {/* Compliance Checks */}
+          {/* Sender Declaration (what the sender provided) */}
           <div className="mb-4">
-            <h6 className="text-secondary mb-3">Compliance Checks</h6>
+            <h6 className="text-secondary mb-3">Sender Declaration</h6>
+            <div className="alert alert-light py-2 mb-2">
+              <small className="text-muted">Declared by the sender at proposal creation</small>
+            </div>
             <div className="row">
               <div className="col-md-6">
-                <div className="d-flex align-items-center mb-2">
-                  <span className="badge bg-success me-2">✓</span>
-                  <span>Sanctions Check: {compliance.sanctionsChecked ? "Passed" : "Failed"}</span>
-                </div>
-                <div className="d-flex align-items-center mb-2">
-                  <span className="badge bg-success me-2">✓</span>
-                  <span>PEP Check: {compliance.pep_check ? "Passed" : "Failed"}</span>
-                </div>
+                <p>
+                  <strong>Purpose of Payment:</strong> {declaration.purposeOfPayment || "N/A"}
+                </p>
               </div>
               <div className="col-md-6">
                 <p>
-                  <strong>Purpose of Payment:</strong> {compliance.purposeOfPayment || "N/A"}
+                  <strong>Source of Funds:</strong> {declaration.sourceOfFunds || "N/A"}
                 </p>
-                <p>
-                  <strong>Source of Funds:</strong> {compliance.sourceOfFunds || "N/A"}
-                </p>
+              </div>
+            </div>
+          </div>
+
+          <hr />
+
+          {/* Compliance Screening (regulator's automated assessment) */}
+          <div className="mb-4">
+            <h6 className="text-secondary mb-3">Compliance Screening</h6>
+            <div className="alert alert-light py-2 mb-2">
+              <small className="text-muted">Produced by the regulator's automated screening service</small>
+            </div>
+            <div className="row">
+              <div className="col-md-6">
+                <div className="d-flex align-items-center mb-2">
+                  <span className={`badge ${screening.sanctionsChecked ? "bg-success" : "bg-danger"} me-2`}>
+                    {screening.sanctionsChecked ? "\u2713" : "\u2717"}
+                  </span>
+                  <span>Sanctions Check: {screening.sanctionsChecked ? "Passed" : "Failed"}</span>
+                </div>
+                <div className="d-flex align-items-center mb-2">
+                  <span className={`badge ${screening.pep_check ? "bg-success" : "bg-danger"} me-2`}>
+                    {screening.pep_check ? "\u2713" : "\u2717"}
+                  </span>
+                  <span>PEP Check: {screening.pep_check ? "Passed" : "Failed"}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -127,17 +151,17 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
                 <div
                   className={`progress-bar bg-${riskColor}`}
                   role="progressbar"
-                  style={{ width: `${compliance.riskScore || 0}%` }}
-                  aria-valuenow={compliance.riskScore || 0}
+                  style={{ width: `${screening.riskScore || 0}%` }}
+                  aria-valuenow={screening.riskScore || 0}
                   aria-valuemin={0}
                   aria-valuemax={100}
                 >
-                  {compliance.riskScore || 0}%
+                  {screening.riskScore || 0}%
                 </div>
               </div>
             </div>
             <p className="text-muted">
-              <strong>AML Notes:</strong> {compliance.amlNotes || "No notes"}
+              <strong>AML Notes:</strong> {screening.amlNotes || "No notes"}
             </p>
           </div>
 
@@ -150,7 +174,7 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
               onClick={handleFlagClick}
               disabled={currentParty?.role !== "regulator"}
             >
-              🚩 Flag as Suspicious
+              Flag as Suspicious
             </button>
             <span className="text-muted ms-2">
               {currentParty?.role !== "regulator" && "(Regulator only)"}

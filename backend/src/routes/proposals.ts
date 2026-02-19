@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { ledger } from '../ledger';
 import { CreateProposalRequest } from '../types';
 import { resolveByBic } from '../identityService';
+import { screenTransaction } from '../complianceService';
 
 const router = Router();
 
@@ -26,6 +27,14 @@ router.get('/', async (req: Request, res: Response) => {
  * POST /api/proposals?party=<senderPartyId>
  * Create a new CrossBorderTxProposal.
  * Both sender and regulator must sign, so we pass both as actAs parties.
+ *
+ * The sender provides:
+ *   - Their own bank details (senderInfo)
+ *   - A declaration (purpose of payment, source of funds)
+ *   - Recipient's public info (institution name + BIC code)
+ *
+ * The sender does NOT provide compliance screening (risk score, AML notes) —
+ * that's produced by the regulator's screening service at acceptance time.
  */
 router.post('/', async (req: Request, res: Response) => {
   const party = req.query.party as string;
@@ -44,7 +53,7 @@ router.post('/', async (req: Request, res: Response) => {
       senderInfo: data.senderInfo,
       recipientName: data.recipientName,
       recipientBic: data.recipientBic,
-      compliance: data.compliance,
+      declaration: data.declaration,  // Sender's own declaration only
       amount: data.amount,
       currency: data.currency,
       createdAt: now,
@@ -68,8 +77,10 @@ router.post('/', async (req: Request, res: Response) => {
  * POST /api/proposals/:contractId/accept?party=<recipientPartyId>
  * Recipient accepts a proposal, creating the fan-out view contracts.
  *
- * The backend auto-resolves the recipient's full bank details from the
- * BIC code stored on the proposal contract (via the identity service).
+ * Two things happen automatically at acceptance:
+ *   1. Recipient's full bank details are resolved from BIC (identity service)
+ *   2. Compliance screening is run by the regulator's service (risk score, AML checks)
+ *
  * The recipient just clicks "Accept" — no form input needed.
  */
 router.post('/:contractId/accept', async (req: Request, res: Response) => {
@@ -78,7 +89,7 @@ router.post('/:contractId/accept', async (req: Request, res: Response) => {
   if (!party) return res.status(400).json({ error: 'party query param required' });
 
   try {
-    // Step 1: Query the proposal to get the BIC code
+    // Step 1: Query the proposal to get BIC + declaration
     const proposals = await ledger.queryContracts(party, 'CrossBorderTxProposal');
     const proposal = proposals.find((p: any) => p.contractId === contractId);
 
@@ -97,13 +108,25 @@ router.post('/:contractId/accept', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown BIC code: ${bic}. Cannot resolve recipient details.` });
     }
 
-    // Step 3: Exercise AcceptProposal with the resolved recipient details
+    // Step 3: Run automated compliance screening (regulator's service)
+    const screening = screenTransaction({
+      senderName: proposal.payload?.senderInfo?.senderName || '',
+      senderCountry: proposal.payload?.senderInfo?.senderCountry || '',
+      recipientName: recipientInfo.recipientName,
+      recipientBic: bic,
+      amount: proposal.payload?.amount || '0',
+      currency: proposal.payload?.currency || 'USD',
+      purposeOfPayment: proposal.payload?.declaration?.purposeOfPayment || '',
+      sourceOfFunds: proposal.payload?.declaration?.sourceOfFunds || '',
+    });
+
+    // Step 4: Exercise AcceptProposal with resolved recipient details + screening results
     const result = await ledger.exerciseChoice(
       party,
       'CrossBorderTxProposal',
       contractId,
       'AcceptProposal',
-      { recipientInfo }
+      { recipientInfo, screening }
     );
 
     // The result contains a 4-tuple: (txCid, senderViewCid, recipientViewCid, regulatorViewCid)
@@ -111,6 +134,7 @@ router.post('/:contractId/accept', async (req: Request, res: Response) => {
 
     res.json({
       status: 'accepted',
+      screening,  // Return the screening result so the caller can see it
       txCid: exerciseResult?.[0],
       senderViewCid: exerciseResult?.[1],
       recipientViewCid: exerciseResult?.[2],

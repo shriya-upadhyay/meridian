@@ -58,10 +58,20 @@ data RecipientDetails = RecipientDetails
     recipientTaxId     : Text   -- Sensitive - only recipient & regulator
   deriving (Eq, Show)
 
-data ComplianceData = ComplianceData
+-- What the SENDER declares when creating the proposal.
+-- These are facts only the sender knows (why they're sending, where
+-- the money comes from). Carried on the proposal and passed through.
+data SenderDeclaration = SenderDeclaration
   with
     purposeOfPayment   : Text
     sourceOfFunds      : Text
+  deriving (Eq, Show)
+
+-- What the REGULATOR's screening system produces.
+-- Risk score, sanctions/PEP checks, and AML notes are determined by
+-- the regulator (or an automated compliance service), never self-reported.
+data ComplianceScreening = ComplianceScreening
+  with
     riskScore          : Int       -- 0-100
     sanctionsChecked   : Bool
     pep_check          : Bool      -- Politically Exposed Person
@@ -173,7 +183,8 @@ template RegulatorView
     txId            : Text
     senderInfo      : SenderDetails
     recipientInfo   : RecipientDetails
-    compliance      : ComplianceData
+    declaration     : SenderDeclaration   -- What sender declared
+    screening       : ComplianceScreening -- Regulator's screening results
     amount          : Decimal
     currency        : Currency
     status          : TxStatus
@@ -189,7 +200,7 @@ template RegulatorView
       controller regulator
       do
         create this with
-          compliance = this.compliance with amlNotes = notes
+          screening = this.screening with amlNotes = notes
 
 
 -- =============================================================================
@@ -268,10 +279,17 @@ template CrossBorderTx
 -- =============================================================================
 -- 5. TRANSACTION PROPOSAL (Initiation Flow)
 -- =============================================================================
--- The sender creates a proposal with only the recipient's public info
--- (institution name + BIC code). The recipient's full bank details are
--- provided at acceptance time (resolved off-chain by the identity service).
--- This ensures the sender NEVER sees the recipient's sensitive bank details.
+-- The sender creates a proposal with:
+--   - Their own bank details (SenderDetails)
+--   - A declaration of purpose/source of funds (SenderDeclaration)
+--   - Recipient's public info only (institution name + BIC code)
+--
+-- What the sender does NOT provide:
+--   - Recipient's bank details → resolved at acceptance from BIC
+--   - Compliance screening → produced by regulator's service at acceptance
+--
+-- This ensures the sender NEVER sees the recipient's sensitive bank details,
+-- and compliance assessments are always done by the regulator — not self-reported.
 
 template CrossBorderTxProposal
   with
@@ -282,7 +300,7 @@ template CrossBorderTxProposal
     senderInfo      : SenderDetails
     recipientName   : Text            -- Public: institution name
     recipientBic    : Text            -- Public: BIC/SWIFT code
-    compliance      : ComplianceData
+    declaration     : SenderDeclaration  -- Sender's own declaration (purpose, source of funds)
     amount          : Decimal
     fxRate          : FxRate
     currency        : Currency
@@ -295,11 +313,13 @@ template CrossBorderTxProposal
     -- RECIPIENT: Accept the proposal → creates all view contracts
     -- =========================================================================
     -- The recipient (or their backend) provides full RecipientDetails at
-    -- acceptance time. These details are resolved off-chain from the BIC code
-    -- by an identity service — the sender never sees them.
+    -- acceptance time (resolved off-chain from the BIC code).
+    -- The compliance screening is also provided at acceptance time — it comes
+    -- from the regulator's automated screening service, NOT from the sender.
     choice AcceptProposal : (ContractId CrossBorderTx, ContractId SenderView, ContractId RecipientView, ContractId RegulatorView)
       with
-        recipientInfo : RecipientDetails  -- Provided at acceptance (resolved from BIC)
+        recipientInfo : RecipientDetails     -- Resolved from BIC by identity service
+        screening     : ComplianceScreening  -- From regulator's screening service
       controller recipient
       do
         -- 1. Main contract (shared, non-sensitive fields only)
@@ -334,10 +354,11 @@ template CrossBorderTxProposal
           fxRate = fxRate
           createdAt
 
-        -- 4. Regulator view (regulator sees EVERYTHING)
+        -- 4. Regulator view (regulator sees EVERYTHING including compliance data)
         regCid <- create RegulatorView with
           regulator; txId; senderInfo; recipientInfo
-          compliance; amount; currency
+          declaration; screening
+          amount; currency
           status = ComplianceCheck
           fxRate = fxRate
           createdAt
@@ -378,16 +399,19 @@ setup = script do
       recipientCountry   = "United Kingdom"
       recipientTaxId     = "GB-987654321"                  -- Sensitive!
 
-    complianceInfo = ComplianceData with
+    -- What the sender declares (they know why they're sending money)
+    senderDecl = SenderDeclaration with
       purposeOfPayment = "Invoice payment for consulting services"
       sourceOfFunds    = "Operating revenue"
+
+    -- What the regulator's screening service produces (automated, not self-reported)
+    screeningResult = ComplianceScreening with
       riskScore        = 15
       sanctionsChecked = True
       pep_check        = True
       amlNotes         = "Low risk transaction, standard due diligence"
 
 
-   
 
     now = time (date 2025 Jun 15) 10 30 0
 
@@ -410,7 +434,7 @@ setup = script do
       senderInfo    = senderDeets
       recipientName = "Bob Ltd"         -- Public info only
       recipientBic  = "WESTGB2L"        -- Public BIC code
-      compliance    = complianceInfo
+      declaration   = senderDecl        -- Sender's own declaration only
       amount        = 250000.00
       currency      = USD
       fxRate = fxRate
@@ -422,6 +446,7 @@ setup = script do
   (txCid, svCid, rvCid, regCid) <- submit recipientParty do
     exerciseCmd proposalCid AcceptProposal with
       recipientInfo = recipientDeets
+      screening     = screeningResult     -- From regulator's screening service
 
   -- Step 3: Regulator reviews and approves (passing view ContractIds)
   (txCid2, svCid2, rvCid2) <- submit regulatorParty do

@@ -23,16 +23,20 @@ export interface CreateProposalRequest {
   };
   recipientName: string;    // Public: institution name
   recipientBic: string;     // Public: BIC/SWIFT code
-  compliance: {
+  declaration: {             // What the sender declares (they know this)
     purposeOfPayment: string;
     sourceOfFunds: string;
-    riskScore: number;
-    sanctionsChecked: boolean;
-    pep_check: boolean;
-    amlNotes: string;
   };
   amount: string;
   currency: string;
+}
+
+// Produced by the regulator's compliance screening service — never self-reported
+export interface ComplianceScreening {
+  riskScore: number;          // 0-100
+  sanctionsChecked: boolean;
+  pep_check: boolean;         // Politically Exposed Person
+  amlNotes: string;
 }
 
 export interface ApproveRequest {

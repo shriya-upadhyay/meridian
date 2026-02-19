@@ -22,8 +22,6 @@ const ProposalForm: React.FC = () => {
     recipientBic: "WESTGB2L",
     purposeOfPayment: "International trade",
     sourceOfFunds: "Business operations",
-    riskScore: "15",
-    amlNotes: "Standard AML check passed",
   });
 
   const [loading, setLoading] = useState(false);
@@ -57,13 +55,9 @@ const ProposalForm: React.FC = () => {
         },
         recipientName: formData.recipientName,
         recipientBic: formData.recipientBic,
-        compliance: {
+        declaration: {
           purposeOfPayment: formData.purposeOfPayment,
           sourceOfFunds: formData.sourceOfFunds,
-          riskScore: parseInt(formData.riskScore),
-          sanctionsChecked: true,
-          pep_check: true,
-          amlNotes: formData.amlNotes,
         },
         amount: formData.amount,
         currency: formData.currency,
@@ -86,8 +80,6 @@ const ProposalForm: React.FC = () => {
         recipientBic: "WESTGB2L",
         purposeOfPayment: "International trade",
         sourceOfFunds: "Business operations",
-        riskScore: "15",
-        amlNotes: "Standard AML check passed",
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create proposal";
@@ -263,8 +255,11 @@ const ProposalForm: React.FC = () => {
         </div>
       </div>
 
-      {/* Compliance Info */}
-      <h6 className="mt-4 mb-3">Compliance & AML/KYC</h6>
+      {/* Sender Declaration */}
+      <h6 className="mt-4 mb-3">Your Declaration</h6>
+      <div className="alert alert-secondary py-2 mb-3">
+        <small>Declare the purpose and source of funds. Compliance screening (risk score, sanctions, PEP checks) is performed automatically by the regulator's service.</small>
+      </div>
       <div className="row">
         <div className="col-md-6">
           <div className="mb-3">
@@ -275,6 +270,7 @@ const ProposalForm: React.FC = () => {
               value={formData.purposeOfPayment}
               onChange={handleChange}
               className="form-control"
+              placeholder="e.g. International trade, consulting services"
             />
           </div>
         </div>
@@ -287,32 +283,7 @@ const ProposalForm: React.FC = () => {
               value={formData.sourceOfFunds}
               onChange={handleChange}
               className="form-control"
-            />
-          </div>
-        </div>
-        <div className="col-md-6">
-          <div className="mb-3">
-            <label className="form-label">Risk Score (0-100)</label>
-            <input
-              type="number"
-              name="riskScore"
-              value={formData.riskScore}
-              onChange={handleChange}
-              className="form-control"
-              min="0"
-              max="100"
-            />
-          </div>
-        </div>
-        <div className="col-md-6">
-          <div className="mb-3">
-            <label className="form-label">AML Notes</label>
-            <input
-              type="text"
-              name="amlNotes"
-              value={formData.amlNotes}
-              onChange={handleChange}
-              className="form-control"
+              placeholder="e.g. Business operations, investment income"
             />
           </div>
         </div>
