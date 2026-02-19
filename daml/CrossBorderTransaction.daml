@@ -268,8 +268,10 @@ template CrossBorderTx
 -- =============================================================================
 -- 5. TRANSACTION PROPOSAL (Initiation Flow)
 -- =============================================================================
--- The sender creates a proposal. When accepted, it fans out into the
--- per-party view contracts with selective information.
+-- The sender creates a proposal with only the recipient's public info
+-- (institution name + BIC code). The recipient's full bank details are
+-- provided at acceptance time (resolved off-chain by the identity service).
+-- This ensures the sender NEVER sees the recipient's sensitive bank details.
 
 template CrossBorderTxProposal
   with
@@ -278,7 +280,8 @@ template CrossBorderTxProposal
     regulator       : Party
     txId            : Text
     senderInfo      : SenderDetails
-    recipientInfo   : RecipientDetails
+    recipientName   : Text            -- Public: institution name
+    recipientBic    : Text            -- Public: BIC/SWIFT code
     compliance      : ComplianceData
     amount          : Decimal
     fxRate          : FxRate
@@ -291,7 +294,12 @@ template CrossBorderTxProposal
     -- =========================================================================
     -- RECIPIENT: Accept the proposal → creates all view contracts
     -- =========================================================================
+    -- The recipient (or their backend) provides full RecipientDetails at
+    -- acceptance time. These details are resolved off-chain from the BIC code
+    -- by an identity service — the sender never sees them.
     choice AcceptProposal : (ContractId CrossBorderTx, ContractId SenderView, ContractId RecipientView, ContractId RegulatorView)
+      with
+        recipientInfo : RecipientDetails  -- Provided at acceptance (resolved from BIC)
       controller recipient
       do
         -- 1. Main contract (shared, non-sensitive fields only)
@@ -306,7 +314,7 @@ template CrossBorderTxProposal
           fxRate = fxRate
           createdAt
 
-        -- 2. Sender view (sender sees own sensitive data)
+        -- 2. Sender view (sender sees own sensitive data + recipient public info)
         svCid <- create SenderView with
           sender; regulator; txId; senderInfo
           amount; currency
@@ -316,7 +324,7 @@ template CrossBorderTxProposal
           fxRate = fxRate
           createdAt
 
-        -- 3. Recipient view (recipient sees own sensitive data)
+        -- 3. Recipient view (recipient sees own sensitive data + sender public info)
         rvCid <- create RecipientView with
           recipient; regulator; txId; recipientInfo
           amount; currency
@@ -391,6 +399,8 @@ setup = script do
       rateProvider  = "Reuters"
 
   -- Step 1: Sender + Regulator co-sign the proposal
+  --         NOTE: Sender only knows recipient's institution name + BIC code.
+  --         Full recipient bank details are NOT included in the proposal.
   proposalCid <- submit (actAs senderParty <> actAs regulatorParty) do
     createCmd CrossBorderTxProposal with
       sender    = senderParty
@@ -398,16 +408,20 @@ setup = script do
       regulator = regulatorParty
       txId
       senderInfo    = senderDeets
-      recipientInfo = recipientDeets
+      recipientName = "Bob Ltd"         -- Public info only
+      recipientBic  = "WESTGB2L"        -- Public BIC code
       compliance    = complianceInfo
       amount        = 250000.00
       currency      = USD
       fxRate = fxRate
       createdAt     = now
 
-  -- Step 2: Recipient accepts → fan-out into per-party views
+  -- Step 2: Recipient accepts → provides their own bank details (resolved
+  --         off-chain from BIC by the identity service). This creates the
+  --         fan-out into per-party view contracts.
   (txCid, svCid, rvCid, regCid) <- submit recipientParty do
-    exerciseCmd proposalCid AcceptProposal
+    exerciseCmd proposalCid AcceptProposal with
+      recipientInfo = recipientDeets
 
   -- Step 3: Regulator reviews and approves (passing view ContractIds)
   (txCid2, svCid2, rvCid2) <- submit regulatorParty do

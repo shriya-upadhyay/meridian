@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { ledger } from '../ledger';
 import { CreateProposalRequest } from '../types';
+import { resolveByBic } from '../identityService';
 
 const router = Router();
 
@@ -41,7 +42,8 @@ router.post('/', async (req: Request, res: Response) => {
       regulator: data.regulator,
       txId: data.txId,
       senderInfo: data.senderInfo,
-      recipientInfo: data.recipientInfo,
+      recipientName: data.recipientName,
+      recipientBic: data.recipientBic,
       compliance: data.compliance,
       amount: data.amount,
       currency: data.currency,
@@ -65,6 +67,10 @@ router.post('/', async (req: Request, res: Response) => {
 /**
  * POST /api/proposals/:contractId/accept?party=<recipientPartyId>
  * Recipient accepts a proposal, creating the fan-out view contracts.
+ *
+ * The backend auto-resolves the recipient's full bank details from the
+ * BIC code stored on the proposal contract (via the identity service).
+ * The recipient just clicks "Accept" — no form input needed.
  */
 router.post('/:contractId/accept', async (req: Request, res: Response) => {
   const { contractId } = req.params;
@@ -72,16 +78,35 @@ router.post('/:contractId/accept', async (req: Request, res: Response) => {
   if (!party) return res.status(400).json({ error: 'party query param required' });
 
   try {
+    // Step 1: Query the proposal to get the BIC code
+    const proposals = await ledger.queryContracts(party, 'CrossBorderTxProposal');
+    const proposal = proposals.find((p: any) => p.contractId === contractId);
+
+    if (!proposal) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    const bic = proposal.payload?.recipientBic;
+    if (!bic) {
+      return res.status(400).json({ error: 'No BIC code found on proposal' });
+    }
+
+    // Step 2: Resolve full recipient details from BIC (off-chain identity service)
+    const recipientInfo = resolveByBic(bic);
+    if (!recipientInfo) {
+      return res.status(400).json({ error: `Unknown BIC code: ${bic}. Cannot resolve recipient details.` });
+    }
+
+    // Step 3: Exercise AcceptProposal with the resolved recipient details
     const result = await ledger.exerciseChoice(
       party,
       'CrossBorderTxProposal',
       contractId,
       'AcceptProposal',
-      {}
+      { recipientInfo }
     );
 
     // The result contains a 4-tuple: (txCid, senderViewCid, recipientViewCid, regulatorViewCid)
-    // Extract from the exercise result
     const exerciseResult = result?.result?.exercise_result || result?.exercise_result || result;
 
     res.json({
