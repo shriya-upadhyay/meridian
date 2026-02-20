@@ -45,19 +45,18 @@ Each piece of data enters the system from the party who actually owns it:
 
 This means no party can fabricate or tamper with another party's data. The system design enforces data integrity, not just data privacy.
 
-### 3. Active Regulatory Workflow
+### 3. Post-Settlement Regulatory Oversight
 
-The regulator isn't just passively observing. They have an active role with real choices:
+Just like in real correspondent banking, transactions aren't pre-approved by regulators — they flow through, and regulators monitor after the fact. The regulator has active tools:
 
-- **Approve** — the transaction can proceed to settlement
-- **Reject** — with a required reason that becomes part of the audit trail
-- **Flag** — mark as suspicious with investigation notes
+- **Freeze** — halt a suspicious transaction before the sender can settle it
+- **Flag** — mark a transaction as suspicious with investigation notes on the RegulatorView
 
-The compliance data (risk score, sanctions/PEP checks) is computed automatically and presented to the regulator for decision-making. Neither the sender nor the recipient ever sees this data — they don't know their own risk score or what the regulator's notes say about them.
+The compliance data (risk score, sanctions/PEP checks) is computed automatically at acceptance time and presented to the regulator for monitoring. Neither the sender nor the recipient ever sees this data — they don't know their own risk score or what the regulator's notes say about them.
 
 ### The Result
 
-This gives you all three properties that were previously impossible to combine: **verifiability** (shared ledger with smart contracts), **privacy** (each party sees only their slice), and **compliance** (regulator gets full audit trail with active approval workflow).
+This gives you all three properties that were previously impossible to combine: **verifiability** (shared ledger with smart contracts), **privacy** (each party sees only their slice), and **compliance** (regulator gets full audit trail with freeze/flag capabilities).
 
 ## Privacy Model: Who Sees What
 
@@ -98,27 +97,26 @@ The DAML contract pattern (signatory/observer-based view contracts) is the same 
 ## Transaction Lifecycle
 
 ```
-1. Sender creates       2. Recipient accepts      3. Regulator reviews     4. Sender settles
-   proposal                (view contracts            (approves or             (payment
-                            fan out)                   rejects)                 finalized)
+1. Sender creates       2. Recipient accepts      3. Sender settles        Regulator monitors
+   proposal                (view contracts            (payment               (can freeze or flag
+                            fan out, auto-approved)    finalized)              at any time)
 ```
 
 **Step 1 — Proposal**: AliceCorp submits a settlement proposal containing:
 - Their own bank details (account number, SWIFT code, tax ID)
+- The recipient's bank details
 - A compliance declaration (purpose of payment, source of funds)
-- The recipient's **public identifiers only** — institution name and BIC code
 
-At this point, AliceCorp does not provide (and does not know) BobLtd's internal settlement account number, tax ID, or routing details. They only know *who* they're paying, not the sensitive details of *how* BobLtd receives funds internally.
-
-**Step 2 — Acceptance**: BobLtd reviews the proposal and accepts. At acceptance time, two things happen:
-- BobLtd's own sensitive details (account number, SWIFT routing, tax ID) enter the system — provided by BobLtd themselves, not by AliceCorp
+**Step 2 — Acceptance**: BobLtd reviews the proposal and accepts. At acceptance time:
 - The compliance service automatically screens the transaction (risk score, sanctions check, PEP check) — produced by the regulator's system, not self-reported by either party
+- The system creates four view contracts, each with different visibility
+- Transaction status moves directly to `Approved` — no regulator gate required
 
-The system then creates four view contracts, each with different visibility. Neither party sees the compliance results. Transaction status moves to `ComplianceCheck`.
+Neither party sees the compliance results.
 
-**Step 3 — Regulatory Review**: MAS sees the `RegulatorView` contract — the only contract containing everything: both parties' full bank details, the sender's declaration, and the compliance screening results. Neither AliceCorp nor BobLtd can see this contract. MAS can approve, reject (with reason), or flag as suspicious.
+**Step 3 — Settlement**: AliceCorp settles the transaction. Status moves to `Settled`.
 
-**Step 4 — Settlement**: After approval, AliceCorp settles the transaction. Status moves to `Settled`.
+**Ongoing — Regulatory Monitoring**: MAS sees the `RegulatorView` contract — the only contract containing everything: both parties' full bank details, the sender's declaration, and the compliance screening results. Neither AliceCorp nor BobLtd can see this contract. MAS can **freeze** suspicious transactions (preventing settlement) or **flag** them with investigation notes.
 
 ## Setup & Installation
 
@@ -170,10 +168,9 @@ Should return:
 1. Open `http://localhost:5173`. You start as **AliceCorp (Sender)**.
 2. Fill in the proposal form and click **Create Proposal**.
 3. Use the party selector dropdown to switch to **BobLtd (Recipient)**.
-4. You'll see the incoming proposal. Click **Accept**.
-5. Switch to **MAS (Regulator)**. You now see full compliance data — risk score, sanctions status, PEP check, source of funds — that neither AliceCorp nor BobLtd can see.
-6. Click **Approve**.
-7. Switch back to **AliceCorp**. Click **Settle** to finalize the transaction.
+4. You'll see the incoming proposal. Click **Accept**. The transaction is now auto-approved.
+5. Switch to **MAS (Regulator)**. You now see full compliance data — risk score, sanctions status, PEP check, source of funds — that neither AliceCorp nor BobLtd can see. You can **freeze** or **flag** suspicious transactions.
+6. Switch back to **AliceCorp**. Click **Settle** to finalize the transaction.
 
 At each step, notice what data is visible and what is hidden. This is Canton's privacy model in action.
 
@@ -186,7 +183,7 @@ React Frontend (Vite, :5173)
   ▼
 Express Backend (:3000)
   ├── routes/proposals.ts      Create, accept, withdraw
-  ├── routes/transactions.ts   Approve, reject, settle
+  ├── routes/transactions.ts   Freeze, settle
   ├── routes/views.ts          Query per-party view contracts
   ├── complianceService.ts     AML/KYC risk screening
   └── ledger.ts                Canton JSON API v2 client
@@ -235,8 +232,7 @@ All endpoints require `?party=<PARTY_ID>` query parameter.
 | `POST` | `/api/proposals/{id}/accept?party=X`    | Accept proposal                  |
 | `POST` | `/api/proposals/{id}/withdraw?party=X`  | Withdraw proposal                |
 | `GET`  | `/api/transactions?party=X`             | List transactions                |
-| `POST` | `/api/transactions/{id}/approve?party=X`| Approve (regulator)              |
-| `POST` | `/api/transactions/{id}/reject?party=X` | Reject with reason               |
+| `POST` | `/api/transactions/{id}/freeze?party=X` | Freeze (regulator)               |
 | `POST` | `/api/transactions/{id}/settle?party=X` | Settle (sender)                  |
 | `GET`  | `/api/sender-views?party=X`             | Query sender view contracts      |
 | `GET`  | `/api/recipient-views?party=X`          | Query recipient view contracts   |
