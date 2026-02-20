@@ -21,8 +21,13 @@ export interface CreateProposalRequest {
     senderCountry: string;
     senderTaxId: string;
   };
-  recipientName: string;    // Public: institution name
-  recipientBic: string;     // Public: BIC/SWIFT code
+  recipientInfo: {
+    recipientName: string;
+    recipientAccount: string;
+    recipientBankSwift: string;
+    recipientCountry: string;
+    recipientTaxId: string;
+  };
   declaration: {             // What the sender declares (they know this)
     purposeOfPayment: string;
     sourceOfFunds: string;

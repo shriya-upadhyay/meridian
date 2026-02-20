@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { ledger } from '../ledger';
 import { CreateProposalRequest } from '../types';
-import { resolveByBic } from '../identityService';
 import { screenTransaction } from '../complianceService';
 
 const router = Router();
@@ -28,13 +27,9 @@ router.get('/', async (req: Request, res: Response) => {
  * Create a new CrossBorderTxProposal.
  * Both sender and regulator must sign, so we pass both as actAs parties.
  *
- * The sender provides:
- *   - Their own bank details (senderInfo)
- *   - A declaration (purpose of payment, source of funds)
- *   - Recipient's public info (institution name + BIC code)
- *
- * The sender does NOT provide compliance screening (risk score, AML notes) —
- * that's produced by the regulator's screening service at acceptance time.
+ * The sender provides all details upfront: their own bank details,
+ * the recipient's bank details, and a declaration (purpose, source of funds).
+ * Compliance screening is NOT included — that's done at acceptance time.
  */
 router.post('/', async (req: Request, res: Response) => {
   const party = req.query.party as string;
@@ -51,9 +46,8 @@ router.post('/', async (req: Request, res: Response) => {
       regulator: data.regulator,
       txId: data.txId,
       senderInfo: data.senderInfo,
-      recipientName: data.recipientName,
-      recipientBic: data.recipientBic,
-      declaration: data.declaration,  // Sender's own declaration only
+      recipientInfo: data.recipientInfo,
+      declaration: data.declaration,
       amount: data.amount,
       currency: data.currency,
       createdAt: now,
@@ -77,11 +71,8 @@ router.post('/', async (req: Request, res: Response) => {
  * POST /api/proposals/:contractId/accept?party=<recipientPartyId>
  * Recipient accepts a proposal, creating the fan-out view contracts.
  *
- * Two things happen automatically at acceptance:
- *   1. Recipient's full bank details are resolved from BIC (identity service)
- *   2. Compliance screening is run by the regulator's service (risk score, AML checks)
- *
- * The recipient just clicks "Accept" — no form input needed.
+ * The backend runs automated compliance screening at acceptance time.
+ * The recipient just clicks "Accept" — no additional input needed.
  */
 router.post('/:contractId/accept', async (req: Request, res: Response) => {
   const { contractId } = req.params;
@@ -89,7 +80,7 @@ router.post('/:contractId/accept', async (req: Request, res: Response) => {
   if (!party) return res.status(400).json({ error: 'party query param required' });
 
   try {
-    // Step 1: Query the proposal to get BIC + declaration
+    // Step 1: Query the proposal to get transaction details for screening
     const proposals = await ledger.queryContracts(party, 'CrossBorderTxProposal');
     const proposal = proposals.find((p: any) => p.contractId === contractId);
 
@@ -97,44 +88,32 @@ router.post('/:contractId/accept', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Proposal not found' });
     }
 
-    const bic = proposal.payload?.recipientBic;
-    if (!bic) {
-      return res.status(400).json({ error: 'No BIC code found on proposal' });
-    }
-
-    // Step 2: Resolve full recipient details from BIC (off-chain identity service)
-    const recipientInfo = resolveByBic(bic);
-    if (!recipientInfo) {
-      return res.status(400).json({ error: `Unknown BIC code: ${bic}. Cannot resolve recipient details.` });
-    }
-
-    // Step 3: Run automated compliance screening (regulator's service)
+    // Step 2: Run automated compliance screening (regulator's service)
     const screening = screenTransaction({
       senderName: proposal.payload?.senderInfo?.senderName || '',
       senderCountry: proposal.payload?.senderInfo?.senderCountry || '',
-      recipientName: recipientInfo.recipientName,
-      recipientBic: bic,
+      recipientName: proposal.payload?.recipientInfo?.recipientName || '',
+      recipientBic: proposal.payload?.recipientInfo?.recipientBankSwift || '',
       amount: proposal.payload?.amount || '0',
       currency: proposal.payload?.currency || 'USD',
       purposeOfPayment: proposal.payload?.declaration?.purposeOfPayment || '',
       sourceOfFunds: proposal.payload?.declaration?.sourceOfFunds || '',
     });
 
-    // Step 4: Exercise AcceptProposal with resolved recipient details + screening results
+    // Step 3: Exercise AcceptProposal with screening results
     const result = await ledger.exerciseChoice(
       party,
       'CrossBorderTxProposal',
       contractId,
       'AcceptProposal',
-      { recipientInfo, screening }
+      { screening }
     );
 
-    // The result contains a 4-tuple: (txCid, senderViewCid, recipientViewCid, regulatorViewCid)
     const exerciseResult = result?.result?.exercise_result || result?.exercise_result || result;
 
     res.json({
       status: 'accepted',
-      screening,  // Return the screening result so the caller can see it
+      screening,
       txCid: exerciseResult?.[0],
       senderViewCid: exerciseResult?.[1],
       recipientViewCid: exerciseResult?.[2],
