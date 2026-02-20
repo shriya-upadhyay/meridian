@@ -20,7 +20,7 @@ class LedgerClient {
             baseURL: LEDGER_BASE_URL,
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${party}`,
+                'Authorization': `Bearer `,
             },
         });
     }

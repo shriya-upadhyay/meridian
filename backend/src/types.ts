@@ -27,13 +27,15 @@ export interface CreateProposalRequest {
     recipientBankSwift: string;
     recipientCountry: string;
     recipientTaxId: string;
+    recipientAccountHash: string;
   };
-  declaration: {             // What the sender declares (they know this)
+  declaration: {             
     purposeOfPayment: string;
     sourceOfFunds: string;
   };
   amount: string;
-  currency: string;
+  sendCurrency: string;
+  receiveCurrency: string;
 }
 
 // Produced by the regulator's compliance screening service — never self-reported
@@ -42,15 +44,6 @@ export interface ComplianceScreening {
   sanctionsChecked: boolean;
   pep_check: boolean;         // Politically Exposed Person
   amlNotes: string;
-}
-
-export interface ApproveRequest {
-  senderViewCid: string;
-  recipientViewCid: string;
-}
-
-export interface RejectRequest {
-  reason: string;
 }
 
 export interface FlagRequest {

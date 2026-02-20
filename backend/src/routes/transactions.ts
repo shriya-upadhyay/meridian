@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { ledger } from '../ledger';
-import { ApproveRequest, RejectRequest } from '../types';
 
 const router = Router();
 
@@ -22,59 +21,27 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/transactions/:contractId/approve?party=<regulatorPartyId>
- * Regulator approves a transaction. Requires senderViewCid and recipientViewCid.
+ * POST /api/transactions/:contractId/freeze?party=<regulatorPartyId>
+ * Regulator freezes a suspicious transaction.
+ * A frozen transaction cannot be settled by the sender.
  */
-router.post('/:contractId/approve', async (req: Request, res: Response) => {
+router.post('/:contractId/freeze', async (req: Request, res: Response) => {
   const { contractId } = req.params;
   const party = req.query.party as string;
   if (!party) return res.status(400).json({ error: 'party query param required' });
-
-  const { senderViewCid, recipientViewCid }: ApproveRequest = req.body;
-  if (!senderViewCid || !recipientViewCid) {
-    return res.status(400).json({ error: 'senderViewCid and recipientViewCid are required' });
-  }
 
   try {
     const result = await ledger.exerciseChoice(
       party,
       'CrossBorderTx',
       contractId,
-      'Approve',
-      { senderViewCid, recipientViewCid }
+      'Freeze',
+      {}
     );
-    res.json({ status: 'approved', result });
+    console.log(`✓ Transaction frozen: contractId=${contractId}, by=${party}`);
+    res.json({ status: 'frozen', result });
   } catch (error: any) {
-    console.error('Error approving transaction:', error?.response?.data || error.message);
-    res.status(500).json({ error: error?.response?.data || error.message });
-  }
-});
-
-/**
- * POST /api/transactions/:contractId/reject?party=<regulatorPartyId>
- * Regulator rejects a transaction with a reason.
- */
-router.post('/:contractId/reject', async (req: Request, res: Response) => {
-  const { contractId } = req.params;
-  const party = req.query.party as string;
-  if (!party) return res.status(400).json({ error: 'party query param required' });
-
-  const { reason }: RejectRequest = req.body;
-  if (!reason) {
-    return res.status(400).json({ error: 'reason is required' });
-  }
-
-  try {
-    const result = await ledger.exerciseChoice(
-      party,
-      'CrossBorderTx',
-      contractId,
-      'Reject',
-      { reason }
-    );
-    res.json({ status: 'rejected', result });
-  } catch (error: any) {
-    console.error('Error rejecting transaction:', error?.response?.data || error.message);
+    console.error('Error freezing transaction:', error?.response?.data || error.message);
     res.status(500).json({ error: error?.response?.data || error.message });
   }
 });
@@ -96,6 +63,7 @@ router.post('/:contractId/settle', async (req: Request, res: Response) => {
       'Settle',
       {}
     );
+    console.log(`✓ Transaction settled: contractId=${contractId}, by=${party}`);
     res.json({ status: 'settled', result });
   } catch (error: any) {
     console.error('Error settling transaction:', error?.response?.data || error.message);

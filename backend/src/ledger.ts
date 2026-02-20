@@ -2,50 +2,182 @@ import axios, { AxiosInstance } from 'axios';
 import { ContractWrapper } from './types';
 
 const LEDGER_BASE_URL = process.env.LEDGER_URL || 'http://localhost:7575';
+const DAML_PACKAGE_NAME = process.env.DAML_PACKAGE_NAME || 'meridian';
 
 /**
- * Canton JSON API v2 client wrapper (SDK 3.4.10).
+ * Canton JSON API v2 client (SDK 3.4.10).
  *
- * `daml start` runs the JSON API on port 7575.
- * The sandbox accepts the party display name as a Bearer token for auth.
+ * Key learnings from debugging against the live Canton sandbox:
  *
- * IMPORTANT: The JSON API v2 uses camelCase field names, NOT snake_case.
+ * 1. templateId uses package-name reference format: "#packageName:Module:Template"
+ *    The "#" prefix tells Canton to resolve by package name, not package ID.
+ *
+ * 2. Parties must be allocated via POST /v2/parties before use.
+ *    `daml start` creates a sandbox with NO pre-allocated parties.
+ *    Full party IDs look like "AliceCorp_Singapore::1220abc...def"
+ *
+ * 3. Queries go to POST /v2/state/active-contracts with:
+ *    - activeAtOffset (required integer, get from GET /v2/state/ledger-end)
+ *    - filter with filtersByParty or filtersForAnyParty
+ *    - verbose: true for labeled fields
+ *
+ * 4. All command fields are camelCase: templateId, createArguments, actAs, etc.
  */
 class LedgerClient {
-  private packageId: string | null = null;
   private moduleName = 'CrossBorderTransaction';
 
-  private getClient(party: string): AxiosInstance {
+  // Maps display name (e.g. "AliceCorp_Singapore") to full party ID
+  private partyMap: Record<string, string> = {};
+
+  private getClient(token: string): AxiosInstance {
     return axios.create({
       baseURL: LEDGER_BASE_URL,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${party}`,
+        'Authorization': `Bearer ${token}`,
       },
     });
   }
 
   private templateId(templateName: string): string {
-    if (this.packageId) {
-      return `${this.packageId}:${this.moduleName}:${templateName}`;
+    return `#${DAML_PACKAGE_NAME}:${this.moduleName}:${templateName}`;
+  }
+
+  /**
+   * Resolve a display name to full party ID.
+   * If the name is already a full ID (contains "::"), return as-is.
+   */
+  resolveParty(displayName: string): string {
+    if (displayName.includes('::')) return displayName;
+    const fullId = this.partyMap[displayName];
+    if (!fullId) {
+      console.warn(`Party "${displayName}" not found in party map, using as-is`);
+      return displayName;
     }
-    // The JSON API accepts module:entity format when there's no ambiguity
-    return `${this.moduleName}:${templateName}`;
+    return fullId;
+  }
+
+  /** Get all known party mappings. */
+  getPartyMap(): Record<string, string> {
+    return { ...this.partyMap };
+  }
+
+  // =========================================================================
+  // Party & User Management (called at startup)
+  // =========================================================================
+
+  /**
+   * Allocate a party on the Canton sandbox.
+   * Returns the full party ID (e.g. "AliceCorp_Singapore::1220abc...").
+   */
+  async allocateParty(hint: string, displayName: string): Promise<string> {
+    const client = this.getClient('participant_admin');
+
+    // Check if party already exists by listing all parties
+    try {
+      const listResp = await client.get('/v2/parties');
+      const parties = listResp.data?.partyDetails || [];
+      const existing = parties.find((p: any) =>
+        p.party && p.party.startsWith(`${hint}::`)
+      );
+      if (existing) {
+        console.log(`  Party "${hint}" already exists: ${existing.party}`);
+        this.partyMap[hint] = existing.party;
+        return existing.party;
+      }
+    } catch {
+      // Could not list parties, try allocating
+    }
+
+    const resp = await client.post('/v2/parties', {
+      partyIdHint: hint,
+      displayName,
+      identityProviderId: '',
+    });
+
+    const fullId = resp.data?.partyDetails?.party;
+    if (!fullId) {
+      throw new Error(`Failed to allocate party "${hint}": ${JSON.stringify(resp.data)}`);
+    }
+
+    console.log(`  Allocated party "${hint}": ${fullId}`);
+    this.partyMap[hint] = fullId;
+    return fullId;
+  }
+
+  /**
+   * Create a user and grant actAs + readAs rights for a party.
+   */
+  async createUserWithRights(userId: string, partyId: string): Promise<void> {
+    const client = this.getClient('participant_admin');
+
+    // Check if user exists
+    try {
+      await client.get(`/v2/users/${userId}`);
+      console.log(`  User "${userId}" already exists`);
+      return; // Already exists
+    } catch (e: any) {
+      if (e?.response?.status !== 404) {
+        // Some other error
+        console.warn(`  Warning checking user "${userId}":`, e?.response?.data || e.message);
+      }
+    }
+
+    // Create user
+    await client.post('/v2/users', {
+      user: {
+        id: userId,
+        isDeactivated: false,
+        primaryParty: partyId,
+        identityProviderId: '',
+        metadata: {
+          resourceVersion: '',
+          annotations: {},
+        },
+      },
+      rights: [],
+    });
+
+    // Grant rights
+    await client.post(`/v2/users/${userId}/rights`, {
+      userId,
+      identityProviderId: '',
+      rights: [
+        { kind: { CanActAs: { value: { party: partyId } } } },
+        { kind: { CanReadAs: { value: { party: partyId } } } },
+      ],
+    });
+
+    console.log(`  Created user "${userId}" with actAs/readAs for party`);
+  }
+
+  // =========================================================================
+  // Ledger Operations
+  // =========================================================================
+
+  /**
+   * Get current ledger end offset.
+   */
+  async getLedgerEnd(party: string): Promise<number> {
+    const client = this.getClient(party);
+    const resp = await client.get('/v2/state/ledger-end');
+    return resp.data?.offset ?? 0;
   }
 
   /**
    * Query active contracts of a given template type.
-   *
-   * Uses POST /v2/state/active-contracts with a filter.
    */
   async queryContracts(party: string, templateName: string): Promise<ContractWrapper[]> {
+    const fullPartyId = this.resolveParty(party);
     const client = this.getClient(party);
 
     try {
+      const offset = await this.getLedgerEnd(party);
+
       const response = await client.post('/v2/state/active-contracts', {
         filter: {
           filtersByParty: {
-            [party]: {
+            [fullPartyId]: {
               cumulative: [
                 {
                   identifierFilter: {
@@ -62,42 +194,31 @@ class LedgerClient {
           },
         },
         verbose: true,
+        activeAtOffset: offset,
       });
 
-      // The response can be a stream of JSON objects or a single response
       const data = response.data;
-
-      // Handle different response formats
       let results: any[] = [];
 
-      if (data?.activeContracts) {
+      if (Array.isArray(data)) {
+        results = data;
+      } else if (data?.activeContracts) {
         results = data.activeContracts;
       } else if (data?.results) {
         results = data.results;
-      } else if (Array.isArray(data)) {
-        results = data;
       }
 
-      // Extract package ID from first result if we don't have it
-      if (!this.packageId && results.length > 0) {
-        const firstResult = results[0];
-        const tid = firstResult?.templateId || firstResult?.createdEvent?.templateId;
-        if (tid && typeof tid === 'string') {
-          const parts = tid.split(':');
-          if (parts.length === 3) {
-            this.packageId = parts[0];
-            console.log(`Discovered package ID: ${this.packageId}`);
-          }
-        }
-      }
-
+      // Canton JSON API v2 response structure:
+      //   [ { contractEntry: { JsActiveContract: { createdEvent: { contractId, templateId, createArgument } } } } ]
       return results.map((r: any) => {
-        // Handle both flat format and createdEvent wrapper format
-        const event = r.createdEvent || r;
+        const event =
+          r.contractEntry?.JsActiveContract?.createdEvent  // Canton v2 format
+          || r.createdEvent                                 // fallback
+          || r;
         return {
           contractId: event.contractId,
           templateId: event.templateId,
-          payload: event.createArguments || event.payload,
+          payload: event.createArgument || event.createArguments || event.payload,
         };
       });
     } catch (error: any) {
@@ -108,14 +229,13 @@ class LedgerClient {
 
   /**
    * Create a new contract on the ledger.
-   *
-   * Uses POST /v2/commands/submit-and-wait with camelCase fields.
    */
   async createContract(
     parties: string[],
     templateName: string,
     payload: Record<string, any>
   ): Promise<any> {
+    const resolvedParties = parties.map(p => this.resolveParty(p));
     const client = this.getClient(parties[0]);
     const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -128,7 +248,7 @@ class LedgerClient {
           },
         },
       ],
-      actAs: parties,
+      actAs: resolvedParties,
       commandId,
       userId: parties[0],
     };
@@ -139,8 +259,6 @@ class LedgerClient {
 
   /**
    * Exercise a choice on an existing contract.
-   *
-   * Uses POST /v2/commands/submit-and-wait with camelCase fields.
    */
   async exerciseChoice(
     party: string,
@@ -163,7 +281,7 @@ class LedgerClient {
           },
         },
       ],
-      actAs: [party],
+      actAs: [this.resolveParty(party)],
       commandId,
       userId: party,
     };

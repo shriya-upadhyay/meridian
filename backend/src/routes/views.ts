@@ -78,6 +78,7 @@ router.post('/regulator-views/:contractId/flag', async (req: Request, res: Respo
       { notes }
     );
     res.json({ status: 'flagged', result });
+    console.log(`flagged ${contractId}`)
   } catch (error: any) {
     console.error('Error flagging transaction:', error?.response?.data || error.message);
     res.status(500).json({ error: error?.response?.data || error.message });
