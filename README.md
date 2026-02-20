@@ -1,110 +1,157 @@
-# Meridian: Cross-Border Transaction DApp
+# Meridian
 
-A production-ready DAML-based cross-border transaction application demonstrating **selective disclosure** and **privacy-by-design** on the Canton Network.
+**Private multi-party transactions on Canton Network.**
 
-## Overview
+Meridian is a cross-border settlement application that demonstrates how multiple parties can transact on a shared ledger while each seeing only the data they're authorized to see. Built with DAML smart contracts on Canton L1, it uses Canton's sub-transaction privacy to enforce data visibility at the ledger level — not through application-layer access control.
 
-Meridian implements a three-party settlement workflow:
+## The Problem
 
-1. **Sender (Alice Corp)** - Initiates cross-border transactions
-2. **Recipient (Bob Ltd)** - Accepts proposals and receives transfers
-3. **Regulator (MAS)** - Reviews AML/KYC compliance and approves/rejects
+Cross-border transactions above certain thresholds are **legally required** to undergo regulatory screening. In the US, banks must file Currency Transaction Reports (CTRs) for transfers over $10,000. The EU's Anti-Money Laundering Directives require enhanced due diligence for high-value transactions. SWIFT's correspondent banking network processes over $5 trillion daily — and every one of those transfers passes through compliance checks.
 
-**Key Features:**
-- ✅ **Selective Disclosure**: Each party sees only their authorized contracts and data
-- ✅ **Privacy-by-Design**: View contracts (SenderView, RecipientView, RegulatorView) limit data visibility
-- ✅ **Complete Workflow**: Proposal → Acceptance → Compliance Review → Settlement
-- ✅ **AML/KYC Integration**: Risk scoring, sanctions checks, PEP checks
-- ✅ **Multi-Currency Support**: USD, EUR, GBP, JPY, CHF, SGD, HKD, AED
-- ✅ **Full-Stack**: DAML contracts + Express backend + React frontend
+This isn't optional. It's the law. And yet, existing systems force a painful tradeoff:
 
-## Technology Stack
+**Public blockchains** (Ethereum, Solana) give you a shared ledger with smart contracts, but every participant — and every validator, indexer, and chain analyst — can see every transaction. This makes them unusable for any scenario where transaction details are sensitive: business payments, medical records, supply chain pricing, legal settlements.
 
-- **Smart Contracts**: DAML 3.4.10 on Canton Network
-- **Backend**: Node.js + Express + TypeScript
-- **Frontend**: React 18 + TypeScript + Vite
-- **API**: RESTful with OpenAPI 3.0 spec
-- **Database**: Canton ledger (no external DB needed for dev)
+**Fully private systems** (Tornado Cash, Zcash) solve the privacy problem but create a compliance problem. Regulators can't audit what they can't see. This is why privacy-focused crypto faces regulatory pushback worldwide.
 
-## Project Structure
+**Traditional systems** (SWIFT, internal databases) are private and compliant, but siloed. Each party maintains their own records, reconciliation takes days, and there's no shared source of truth.
+
+The result: organizations that need both privacy AND auditability — banks, hospitals, supply chains, legal firms, aid organizations — are stuck with slow, fragmented systems because no blockchain has been able to offer both.
+
+## How Meridian Solves It
+
+Most blockchains work like a public bulletin board — when you post a transaction, everyone can read it. Canton Network works differently. It only sends transaction data to the parties who are directly involved. If you're not part of the transaction, the data never reaches your node. It's not encrypted or hidden — it simply isn't sent to you.
+
+Meridian builds on top of this with three design choices that go beyond Canton's built-in privacy:
+
+### 1. View Contract Fan-Out
+
+When a recipient accepts a proposal, Meridian doesn't just create one contract. It creates **four contracts simultaneously**, each scoped to different parties:
+
+- `CrossBorderTx` — shared summary visible to all three parties (no sensitive details)
+- `SenderView` — sender's full bank details, visible only to sender + regulator
+- `RecipientView` — recipient's full bank details, visible only to recipient + regulator
+- `RegulatorView` — everything combined, visible only to the regulator
+
+This fan-out pattern is a reusable architecture for any multi-party workflow where different roles need different levels of access.
+
+### 2. Data Provenance
+
+Each piece of data enters the system from the party who actually owns it:
+
+- The **sender** provides their own bank details and a compliance declaration
+- The **recipient** provides their own bank details at acceptance time — the sender never handles them
+- The **compliance screening** (risk score, sanctions check, PEP flag) is produced by the regulator's automated service — neither party self-reports their own risk
+
+This means no party can fabricate or tamper with another party's data. The system design enforces data integrity, not just data privacy.
+
+### 3. Active Regulatory Workflow
+
+The regulator isn't just passively observing. They have an active role with real choices:
+
+- **Approve** — the transaction can proceed to settlement
+- **Reject** — with a required reason that becomes part of the audit trail
+- **Flag** — mark as suspicious with investigation notes
+
+The compliance data (risk score, sanctions/PEP checks) is computed automatically and presented to the regulator for decision-making. Neither the sender nor the recipient ever sees this data — they don't know their own risk score or what the regulator's notes say about them.
+
+### The Result
+
+This gives you all three properties that were previously impossible to combine: **verifiability** (shared ledger with smart contracts), **privacy** (each party sees only their slice), and **compliance** (regulator gets full audit trail with active approval workflow).
+
+## Privacy Model: Who Sees What
+
+This is the core of what Meridian demonstrates. For any given transaction, here is exactly what each party can and cannot see:
+
+| Data Field                 | Sender (AliceCorp) | Recipient (BobLtd) | Regulator (MAS) | Uninvolved Party |
+|:---------------------------|:------------------:|:------------------:|:---------------:|:----------------:|
+| Transaction exists         | Visible            | Visible            | Visible         | **Hidden**       |
+| Amount & currency          | Visible            | Visible            | Visible         | **Hidden**       |
+| FX rate                    | Visible            | Visible            | Visible         | **Hidden**       |
+| Transaction status         | Visible            | Visible            | Visible         | **Hidden**       |
+| Sender name & country      | Visible            | Visible            | Visible         | **Hidden**       |
+| Recipient name & country   | Visible            | Visible            | Visible         | **Hidden**       |
+| Sender account & SWIFT     | Visible            | **Hidden**         | Visible         | **Hidden**       |
+| Sender tax ID              | Visible            | **Hidden**         | Visible         | **Hidden**       |
+| Recipient account & SWIFT  | **Hidden**         | Visible            | Visible         | **Hidden**       |
+| Recipient tax ID           | **Hidden**         | Visible            | Visible         | **Hidden**       |
+| Purpose of payment         | **Hidden**         | **Hidden**         | Visible         | **Hidden**       |
+| Source of funds             | **Hidden**         | **Hidden**         | Visible         | **Hidden**       |
+| AML risk score             | **Hidden**         | **Hidden**         | Visible         | **Hidden**       |
+| Sanctions check            | **Hidden**         | **Hidden**         | Visible         | **Hidden**       |
+| PEP check                  | **Hidden**         | **Hidden**         | Visible         | **Hidden**       |
+| AML notes                  | **Hidden**         | **Hidden**         | Visible         | **Hidden**       |
+
+**How this is enforced**: Each row maps to a field on a specific DAML contract template. The contract's `signatory` and `observer` declarations determine which parties can see it. Canton's ledger only delivers contract data to stakeholders — there is no API endpoint, database query, or network request that an uninvolved party could use to access this data. It is never sent to them.
+
+## Beyond Cross-Border Payments
+
+The privacy pattern Meridian demonstrates — **multiple parties transact, an auditor gets full visibility, everyone else sees nothing** — applies to any multi-party workflow where data sensitivity matters:
+
+- **Supply chain finance** — A manufacturer pays a supplier. The logistics provider sees shipment status but not the price. Customs sees everything for trade compliance. Competitors on the same network see nothing.
+- **Healthcare** — A patient shares records with a specialist. Insurance can verify the claim without seeing the diagnosis. A fraud auditor can review everything. Other patients' data is invisible.
+- **Legal settlements** — Two parties settle a dispute. The court has full visibility. Opposing counsel in unrelated cases cannot see the terms.
+- **Aid disbursement** — A donor funds a humanitarian project. The implementing NGO sees their allocation. The oversight body sees all fund flows. Other donors' contributions remain private.
+
+The DAML contract pattern (signatory/observer-based view contracts) is the same in each case. Meridian's cross-border payment is one instantiation of a general-purpose privacy model.
+
+## Transaction Lifecycle
 
 ```
-meridian/
-├── daml/
-│   └── CrossBorderTransaction.daml    # DAML smart contracts (5 templates)
-├── backend/
-│   ├── src/
-│   │   ├── index.ts                   # Express server entry point
-│   │   ├── ledger.ts                  # Canton JSON API client
-│   │   ├── types.ts                   # TypeScript interfaces
-│   │   └── routes/
-│   │       ├── proposals.ts
-│   │       ├── transactions.ts
-│   │       └── views.ts
-│   ├── package.json
-│   └── tsconfig.json
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                    # Root component
-│   │   ├── api.ts                     # HTTP client
-│   │   ├── stores/                    # React Context stores
-│   │   ├── views/                     # Dashboard pages
-│   │   ├── components/                # Reusable components
-│   │   └── utils/                     # Helper functions
-│   ├── vite.config.ts
-│   ├── index.html
-│   └── package.json
-├── common/
-│   └── openapi.yaml                   # REST API specification
-└── daml.yaml                          # DAML project config
+1. Sender creates       2. Recipient accepts      3. Regulator reviews     4. Sender settles
+   proposal                (view contracts            (approves or             (payment
+                            fan out)                   rejects)                 finalized)
 ```
 
-## Prerequisites
+**Step 1 — Proposal**: AliceCorp submits a settlement proposal containing:
+- Their own bank details (account number, SWIFT code, tax ID)
+- A compliance declaration (purpose of payment, source of funds)
+- The recipient's **public identifiers only** — institution name and BIC code
 
-1. **DAML SDK 3.4.10** - Install from [digitalasset.com](https://docs.digitalasset.com/build/3.4/getting-started/installation.html)
-2. **Node.js 18+** - For backend and frontend
-3. **npm 9+** - Package manager
-4. **Docker** (optional) - For containerized deployment
+At this point, AliceCorp does not provide (and does not know) BobLtd's internal settlement account number, tax ID, or routing details. They only know *who* they're paying, not the sensitive details of *how* BobLtd receives funds internally.
 
-## Quick Start (3 Terminals)
+**Step 2 — Acceptance**: BobLtd reviews the proposal and accepts. At acceptance time, two things happen:
+- BobLtd's own sensitive details (account number, SWIFT routing, tax ID) enter the system — provided by BobLtd themselves, not by AliceCorp
+- The compliance service automatically screens the transaction (risk score, sanctions check, PEP check) — produced by the regulator's system, not self-reported by either party
 
-### Terminal 1: Start Canton Sandbox & JSON API
+The system then creates four view contracts, each with different visibility. Neither party sees the compliance results. Transaction status moves to `ComplianceCheck`.
 
+**Step 3 — Regulatory Review**: MAS sees the `RegulatorView` contract — the only contract containing everything: both parties' full bank details, the sender's declaration, and the compliance screening results. Neither AliceCorp nor BobLtd can see this contract. MAS can approve, reject (with reason), or flag as suspicious.
+
+**Step 4 — Settlement**: After approval, AliceCorp settles the transaction. Status moves to `Settled`.
+
+## Setup & Installation
+
+### Prerequisites
+
+- **DAML SDK 3.4.10**: `curl -sSL https://get.daml.com/ | sh` then add `~/.daml/bin` to your PATH
+- **Node.js 18+**: [nodejs.org](https://nodejs.org/)
+
+### Running Locally (3 terminals)
+
+**Terminal 1 — Start Canton sandbox + compile contracts:**
 ```bash
-cd /Users/shriyaupadhyay/projects/meridian
-
-# Build DAML contract (if not already built)
-~/.daml/bin/daml build
-
-# Start sandbox with JSON API on port 7575
-~/.daml/bin/daml start
+cd meridian
+daml build && daml start
 ```
+This starts a local Canton ledger with the JSON API on `localhost:7575`.
 
-Expected output:
-```
-INFO: Digital Asset Developer Sandbox
-INFO: JSON API server at http://localhost:7575
-INFO: Loaded scenario 'setup' from script
-```
-
-### Terminal 2: Start Express Backend
-
+**Terminal 2 — Start the backend:**
 ```bash
-cd /Users/shriyaupadhyay/projects/meridian/backend
-
-# Install dependencies (already done, but run if needed)
-npm install
-
-# Start development server on port 3000
-npm run dev
+cd meridian/backend
+npm install && npm run dev
 ```
+Express API server on `localhost:3000`.
 
-Expected output:
+**Terminal 3 — Start the frontend:**
+```bash
+cd meridian/frontend
+npm install && npm run dev
 ```
-Server running on port 3000
-```
+React app on `localhost:5173`. Open this in your browser.
 
-Verify with:
+### Verify
+
 ```bash
 curl http://localhost:3000/api/parties
 ```
@@ -114,278 +161,114 @@ Should return:
 [
   {"id": "AliceCorp_Singapore", "name": "AliceCorp (Sender)", "role": "sender"},
   {"id": "BobLtd_London", "name": "BobLtd (Recipient)", "role": "recipient"},
-  {"id": "MAS_Regulator", "name": "MAS (Regulator)", "role": "regulator"}
+  {"id": "MAS_Regulator", "name": "MAS Regulator", "role": "regulator"}
 ]
 ```
 
-### Terminal 3: Start React Frontend
+## Demo Walkthrough
 
-```bash
-cd /Users/shriyaupadhyay/projects/meridian/frontend
+1. Open `http://localhost:5173`. You start as **AliceCorp (Sender)**.
+2. Fill in the proposal form and click **Create Proposal**.
+3. Use the party selector dropdown to switch to **BobLtd (Recipient)**.
+4. You'll see the incoming proposal. Click **Accept**.
+5. Switch to **MAS (Regulator)**. You now see full compliance data — risk score, sanctions status, PEP check, source of funds — that neither AliceCorp nor BobLtd can see.
+6. Click **Approve**.
+7. Switch back to **AliceCorp**. Click **Settle** to finalize the transaction.
 
-# Install dependencies (already done, but run if needed)
-npm install
+At each step, notice what data is visible and what is hidden. This is Canton's privacy model in action.
 
-# Start Vite dev server on port 5173
-npm run dev
+## Architecture
+
+```
+React Frontend (Vite, :5173)
+  │
+  │  HTTP
+  ▼
+Express Backend (:3000)
+  ├── routes/proposals.ts      Create, accept, withdraw
+  ├── routes/transactions.ts   Approve, reject, settle
+  ├── routes/views.ts          Query per-party view contracts
+  ├── complianceService.ts     AML/KYC risk screening
+  └── ledger.ts                Canton JSON API v2 client
+        │
+        │  HTTP
+        ▼
+Canton JSON API (:7575)
+        │
+        ▼
+Canton Ledger (DAML smart contracts)
 ```
 
-Expected output:
+### DAML Smart Contracts
+
+Five templates in `daml/CrossBorderTransaction.daml`:
+
+| Template                  | Signatories       | Observers            | Purpose                                                    |
+|:--------------------------|:------------------|:---------------------|:-----------------------------------------------------------|
+| `CrossBorderTxProposal`   | Sender, Regulator | Recipient            | Entry point — proposal before acceptance                   |
+| `CrossBorderTx`           | Sender            | Recipient, Regulator | Orchestrating contract with shared non-sensitive fields    |
+| `SenderView`              | Sender            | Regulator            | Sender's full details (account, SWIFT, tax ID)             |
+| `RecipientView`           | Recipient         | Regulator            | Recipient's full details (account, SWIFT, tax ID)          |
+| `RegulatorView`           | Regulator         | —                    | Everything: both parties' details + AML/KYC compliance data|
+
+**Signatories** have full read/write access and always see the contract. **Observers** have read-only visibility. Parties not listed as either **cannot see the contract at all**.
+
+### Tech Stack
+
+| Layer           | Technology                     |
+|:----------------|:-------------------------------|
+| Smart Contracts | DAML 3.4.10                    |
+| Ledger          | Canton Network (L1)            |
+| Backend         | Node.js, Express, TypeScript   |
+| Frontend        | React 18, Vite, TypeScript     |
+| State           | Canton Ledger (no external DB) |
+
+## API Reference
+
+All endpoints require `?party=<PARTY_ID>` query parameter.
+
+| Method | Endpoint                                | Description                      |
+|:-------|:----------------------------------------|:---------------------------------|
+| `GET`  | `/api/parties`                          | List parties                     |
+| `GET`  | `/api/proposals?party=X`                | List proposals visible to party  |
+| `POST` | `/api/proposals?party=X`                | Create proposal                  |
+| `POST` | `/api/proposals/{id}/accept?party=X`    | Accept proposal                  |
+| `POST` | `/api/proposals/{id}/withdraw?party=X`  | Withdraw proposal                |
+| `GET`  | `/api/transactions?party=X`             | List transactions                |
+| `POST` | `/api/transactions/{id}/approve?party=X`| Approve (regulator)              |
+| `POST` | `/api/transactions/{id}/reject?party=X` | Reject with reason               |
+| `POST` | `/api/transactions/{id}/settle?party=X` | Settle (sender)                  |
+| `GET`  | `/api/sender-views?party=X`             | Query sender view contracts      |
+| `GET`  | `/api/recipient-views?party=X`          | Query recipient view contracts   |
+| `GET`  | `/api/regulator-views?party=X`          | Query regulator view contracts   |
+
+Full spec: [`common/openapi.yaml`](common/openapi.yaml)
+
+## Project Structure
+
 ```
-VITE v6.x.x  ready in 234 ms
-
-➜  Local:   http://localhost:5173/
+meridian/
+├── daml/
+│   └── CrossBorderTransaction.daml   # 5 DAML templates + test script
+├── backend/
+│   └── src/
+│       ├── index.ts                  # Express server, party definitions
+│       ├── ledger.ts                 # Canton JSON API v2 client
+│       ├── complianceService.ts      # AML/KYC risk screening
+│       ├── types.ts                  # TypeScript interfaces
+│       └── routes/                   # REST endpoints
+├── frontend/
+│   └── src/
+│       ├── App.tsx                   # Router
+│       ├── api.ts                    # HTTP client
+│       ├── stores/                   # React Context state management
+│       ├── views/                    # Per-party dashboard pages
+│       └── components/               # Forms, tables, compliance panel
+├── common/
+│   └── openapi.yaml                  # OpenAPI 3.0 specification
+└── daml.yaml                         # DAML SDK config
 ```
-
-Open browser and navigate to: **http://localhost:5173**
-
-## Usage Guide
-
-### 1. Select a Party
-
-Use the dropdown in the header to switch between:
-- **Sender (AliceCorp)** - Create and settle proposals
-- **Recipient (BobLtd)** - Accept proposals
-- **Regulator (MAS)** - Approve/reject and flag suspicious transactions
-
-### 2. Sender Flow
-
-1. Navigate to **Sender Dashboard**
-2. Fill in the **Create New Proposal** form:
-   - Recipient: BobLtd
-   - Amount: 1000
-   - Currency: USD
-   - Sender details (your info)
-   - Recipient details (their info)
-   - Compliance data (purpose, risk score, etc.)
-3. Click **Create Proposal**
-4. Proposal appears in "My Proposals" with "Pending" status
-5. Wait for recipient to accept and regulator to approve
-6. Once approved, click **Settle** to complete
-
-### 3. Recipient Flow
-
-1. Navigate to **Recipient Dashboard**
-2. See pending proposals in "Pending Proposals" section
-3. Review proposal details
-4. Click **Accept** to accept the proposal
-5. Proposal becomes a transaction awaiting regulator approval
-6. Monitor transaction status in "My Transactions"
-
-### 4. Regulator Flow
-
-1. Navigate to **Regulator Dashboard**
-2. See overview statistics (Pending, Approved, Rejected, Total)
-3. Click on a transaction to view **Compliance Data**:
-   - Sender & recipient information
-   - AML/KYC checks (sanctions, PEP)
-   - Risk score visualization
-   - Source of funds and payment purpose
-4. Review and decide:
-   - **Approve** - Transaction can proceed to settlement
-   - **Reject** - Reject with detailed reason
-   - **Flag** - Mark as suspicious with investigation notes
-5. All actions are audited and recorded
-
-## Privacy & Selective Disclosure
-
-Meridian demonstrates **selective disclosure** using DAML's contract model:
-
-### Sender Sees:
-✅ Own full details (account, SWIFT, tax ID)
-✅ Recipient's name and country
-✗ Recipient's account, SWIFT, tax ID
-✗ AML/KYC compliance data
-
-### Recipient Sees:
-✅ Own full details (account, SWIFT, tax ID)
-✅ Sender's name and country
-✗ Sender's account, SWIFT, tax ID
-✗ AML/KYC compliance data
-
-### Regulator Sees:
-✅ **Everything** - Full audit trail, all party details, compliance data
-✓ This is intentional - regulators need complete visibility
-
-## API Endpoints
-
-### Parties
-- `GET /api/parties` - List available parties
-
-### Proposals
-- `GET /api/proposals?party=X` - List proposals visible to party
-- `POST /api/proposals?party=X` - Create new proposal
-- `POST /api/proposals/{id}/accept?party=X` - Accept proposal
-- `POST /api/proposals/{id}/withdraw?party=X` - Withdraw proposal
-
-### Transactions
-- `GET /api/transactions?party=X` - List transactions
-- `POST /api/transactions/{id}/approve?party=X` - Approve transaction
-- `POST /api/transactions/{id}/reject?party=X` - Reject transaction
-- `POST /api/transactions/{id}/settle?party=X` - Settle transaction
-
-### Views (Privacy Contracts)
-- `GET /api/sender-views?party=X` - List sender views
-- `GET /api/recipient-views?party=X` - List recipient views
-- `GET /api/regulator-views?party=X` - List regulator views
-- `POST /api/regulator-views/{id}/flag?party=X` - Flag suspicious
-
-See `common/openapi.yaml` for full API specification.
-
-## DAML Smart Contracts
-
-The DAML contract (`daml/CrossBorderTransaction.daml`) implements:
-
-### Templates
-
-1. **CrossBorderTxProposal**
-   - Signatories: Sender, Regulator
-   - Observers: Recipient
-   - Choices: `AcceptProposal`, `WithdrawProposal`
-
-2. **CrossBorderTx** (Main Contract)
-   - Signatories: Sender
-   - Observers: Recipient, Regulator
-   - Choices: `Approve`, `Reject`, `Settle`, `RequestCancellation`
-
-3. **SenderView** (Privacy View)
-   - Visible to: Sender, Regulator
-   - Contains: Sender's full details, recipient name/country only
-
-4. **RecipientView** (Privacy View)
-   - Visible to: Recipient, Regulator
-   - Contains: Recipient's full details, sender name/country only
-
-5. **RegulatorView** (Privacy View)
-   - Visible to: Regulator only
-   - Contains: **All** information for compliance purposes
-
-### Data Types
-
-- **Currency**: USD, EUR, GBP, JPY, CHF, SGD, HKD, AED
-- **TxStatus**: Initiated, ComplianceCheck, Approved, Rejected, Settled, Cancelled
-- **SenderDetails**: Name, account, SWIFT, country, tax ID
-- **RecipientDetails**: Name, account, SWIFT, country, tax ID
-- **ComplianceData**: Purpose, source of funds, risk score, sanctions/PEP checks, AML notes
-- **FxRate**: Exchange rate, timestamp, provider
-
-## Troubleshooting
-
-### Issue: "daml command not found"
-**Solution**: Add daml to PATH
-```bash
-export PATH="$HOME/.daml/bin:$PATH"
-# Add to ~/.zshrc or ~/.bash_profile to make permanent
-```
-
-### Issue: "Cannot GET /api/parties"
-**Solution**: Ensure backend is running on port 3000
-```bash
-cd backend && npm run dev
-```
-
-### Issue: "Failed to connect to ledger"
-**Solution**: Ensure Canton sandbox is running
-```bash
-~/.daml/bin/daml start
-```
-
-### Issue: Port 5173/3000/7575 already in use
-**Solution**: Kill existing process
-```bash
-lsof -i :5173  # Find process using port
-kill -9 <PID>   # Kill process
-```
-
-## Development
-
-### Backend Development
-
-The backend is hot-reloaded with `tsx`:
-```bash
-cd backend
-npm run dev  # Watches for file changes
-```
-
-### Frontend Development
-
-Vite provides hot module reloading:
-```bash
-cd frontend
-npm run dev  # Auto-reloads on file changes
-```
-
-### Building for Production
-
-```bash
-# Build DAML
-cd meridian
-~/.daml/bin/daml build
-
-# Build backend (TypeScript → JavaScript)
-cd backend
-npm run build
-
-# Build frontend (React → static HTML/JS)
-cd frontend
-npm run build
-```
-
-## Testing
-
-### Run DAML Tests
-```bash
-cd /Users/shriyaupadhyay/projects/meridian
-~/.daml/bin/daml test --verbose
-```
-
-### Manual Integration Test
-1. Create proposal (Sender)
-2. Accept proposal (Recipient)
-3. Approve transaction (Regulator)
-4. Settle transaction (Sender)
-5. Verify all party views updated correctly
-
-## Architecture Decisions
-
-1. **No External Database** - Canton ledger serves as the source of truth
-2. **Fetch-based API Client** - Simple, no heavy dependencies
-3. **React Context for State** - Easy to understand, no Redux boilerplate
-4. **View Contracts for Privacy** - DAML native privacy, no application-layer hacks
-5. **OpenAPI Spec** - Single source of truth for API contracts
-
-## Security Considerations
-
-⚠️ **This is a development application.** For production:
-
-1. **Authentication** - Replace party display names with OAuth/JWT
-2. **TLS/SSL** - Use HTTPS in production
-3. **Rate Limiting** - Add request throttling
-4. **Audit Logging** - Log all regulatory actions
-5. **Encryption** - Encrypt sensitive data at rest
-6. **PII Compliance** - Handle GDPR/CCPA requirements
-
-## License
-
-MIT
-
-## Support
-
-For issues or questions:
-1. Check the Troubleshooting section
-2. Review logs in Canton sandbox output
-3. Check browser console for frontend errors
-4. Verify API calls with `curl` before debugging frontend
-
-## Next Steps
-
-1. ✅ Deploy to Canton testnet
-2. ✅ Add real bank integration (SWIFT, account lookup)
-3. ✅ Implement real AML/KYC screening (Dow Jones, Lexis Nexis)
-4. ✅ Add regulatory reporting (FinCEN, FATF)
-5. ✅ Multi-currency settlement with FX rates
-6. ✅ Mobile app for party notifications
 
 ---
 
-**Happy transacting! 🚀**
+Built for the Canton Network Hackathon at ETH Denver 2026.
