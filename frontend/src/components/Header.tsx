@@ -6,19 +6,17 @@ const Header: React.FC = () => {
   const { currentParty } = usePartyStore();
 
   return (
-    <nav className="navbar navbar-light bg-light mb-4 border-bottom">
-      <div className="container-fluid">
-        <span className="navbar-brand mb-0 h1">
-          <strong>Cross-Border Transaction DApp</strong>
-        </span>
-        <div className="d-flex align-items-center gap-3">
-          {currentParty && (
-            <span className="badge bg-primary px-3 py-2">
-              Current Party: <strong>{currentParty.name}</strong>
-            </span>
-          )}
-          <PartySelector />
-        </div>
+    <nav className="meridian-navbar mb-4 d-flex align-items-center justify-content-between">
+      <span className="navbar-brand mb-0">
+        <span>Meridian</span> | Cross-Border Transactions
+      </span>
+      <div className="d-flex align-items-center gap-3">
+        {currentParty && (
+          <span className="party-badge">
+            Acting as: <strong>{currentParty.name}</strong>
+          </span>
+        )}
+        <PartySelector />
       </div>
     </nav>
   );

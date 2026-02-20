@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useTransactions } from "../stores/transactionStore";
 import { usePartyStore } from "../stores/partyStore";
+import api from "../api";
 import Modal from "./Modal";
 
 interface CompliancePanelProps {
@@ -13,19 +14,49 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [flagNotes, setFlagNotes] = useState("");
   const [flagLoading, setFlagLoading] = useState(false);
+  const [regulatorView, setRegulatorView] = useState<any>(null);
+  const [viewLoading, setViewLoading] = useState(false);
 
-  // Find the transaction to display
-  const transaction = transactionId
-    ? transactions.find((tx) => tx.contractId === transactionId)
-    : transactions[0];
+  // Find the CrossBorderTx to get its txId, then fetch the matching RegulatorView
+  // (RegulatorView has the full compliance data: senderInfo, recipientInfo, declaration, screening)
+  useEffect(() => {
+    if (!transactionId || !currentParty || currentParty.role !== 'regulator') {
+      setRegulatorView(null);
+      return;
+    }
 
-  if (!transaction) {
-    return <div className="alert alert-warning">No transaction data available</div>;
+    const tx = transactions.find((t) => t.contractId === transactionId);
+    if (!tx) {
+      setRegulatorView(null);
+      return;
+    }
+
+    const txId = (tx.payload as any)?.txId;
+    if (!txId) return;
+
+    setViewLoading(true);
+    api.listRegulatorViews(currentParty.id).then((views) => {
+      const match = views.find((v) => (v.payload as any)?.txId === txId);
+      setRegulatorView(match || null);
+    }).catch((err) => {
+      console.error('Failed to fetch regulator views:', err);
+      setRegulatorView(null);
+    }).finally(() => {
+      setViewLoading(false);
+    });
+  }, [transactionId, currentParty, transactions]);
+
+  if (viewLoading) {
+    return <div className="alert alert-info">Loading compliance data...</div>;
   }
 
-  const payload = transaction.payload as any;
+  if (!regulatorView) {
+    return <div className="alert alert-warning">No compliance data available. Select a transaction to view details.</div>;
+  }
 
-  // The RegulatorView has both declaration (sender-provided) and screening (regulator-produced)
+  const payload = regulatorView.payload as any;
+
+  // RegulatorView has full compliance data
   const declaration = payload?.declaration || {};
   const screening = payload?.screening || {};
   const sender = payload?.senderInfo || {};
@@ -44,12 +75,24 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
   };
 
   const handleFlagSubmit = async () => {
+    if (!currentParty || !regulatorView) return;
     setFlagLoading(true);
     try {
-      // TODO: Implement API call to flag suspicious transaction
-      // await api.flagSuspicious(currentParty?.id, transaction.contractId, { notes: flagNotes });
+      await api.flagSuspicious(currentParty.id, regulatorView.contractId, { notes: flagNotes });
       setFlagModalOpen(false);
       setFlagNotes("");
+      // Re-fetch the regulator view to show updated AML notes
+      const tx = transactions.find((t) => t.contractId === transactionId);
+      if (tx) {
+        const txId = (tx.payload as any)?.txId;
+        if (txId) {
+          const views = await api.listRegulatorViews(currentParty.id);
+          const match = views.find((v) => (v.payload as any)?.txId === txId);
+          setRegulatorView(match || null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to flag transaction:', err);
     } finally {
       setFlagLoading(false);
     }
@@ -58,10 +101,29 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ transactionId }) => {
   return (
     <>
       <div className="card mb-4">
-        <div className="card-header bg-info text-white">
-          <h5 className="mb-0">Compliance & AML/KYC Data</h5>
+        <div className="compliance-header">
+          <h5>Compliance & AML/KYC Data</h5>
         </div>
         <div className="card-body">
+          {/* Transaction Overview */}
+          <div className="row mb-4">
+            <div className="col-md-3">
+              <p><strong>Transaction ID:</strong> {payload?.txId || "N/A"}</p>
+            </div>
+            <div className="col-md-3">
+              <p><strong>Send Amount:</strong> {payload?.amount != null && !isNaN(Number(payload.amount)) ? Number(payload.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "N/A"} {payload?.sendCurrency || ""}</p>
+            </div>
+            <div className="col-md-3">
+              <p><strong>Receive Currency:</strong> {payload?.receiveCurrency || "N/A"}</p>
+              {payload?.fxRate && <p className="text-muted" style={{ fontSize: '0.82rem' }}>Rate: {payload.fxRate.rate} ({payload.fxRate.rateProvider})</p>}
+            </div>
+            <div className="col-md-3">
+              <p><strong>Status:</strong> {payload?.status || "N/A"}</p>
+            </div>
+          </div>
+
+          <hr />
+
           {/* Party Information */}
           <div className="row mb-4">
             <div className="col-md-6">

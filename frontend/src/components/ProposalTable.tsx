@@ -38,6 +38,8 @@ const ProposalTable: React.FC<ProposalTableProps> = ({ role = "sender" }) => {
     }
   };
 
+  console.log(proposals)
+
   return (
     <div className="table-responsive">
       <table className="table table-striped">
@@ -45,7 +47,7 @@ const ProposalTable: React.FC<ProposalTableProps> = ({ role = "sender" }) => {
           <tr>
             <th>Contract ID</th>
             <th>Amount</th>
-            <th>Currency</th>
+            <th>Currencies</th>
             <th>Status</th>
             <th>Sender</th>
             <th>Recipient</th>
@@ -55,10 +57,11 @@ const ProposalTable: React.FC<ProposalTableProps> = ({ role = "sender" }) => {
         <tbody>
           {proposals.map((proposal) => {
             const payload = proposal.payload as any;
-            const senderName = payload?.senderDetails?.senderName || "Unknown";
-            const recipientName = payload?.recipientDetails?.recipientName || "Unknown";
-            const amount = payload?.amount || "N/A";
-            const currency = payload?.currency || "N/A";
+            const senderName = payload?.senderInfo?.senderName || "Unknown";
+            const recipientName = payload?.recipientInfo?.recipientName || "Unknown";
+            const amount = payload?.amount != null && !isNaN(Number(payload.amount)) ? Number(payload.amount).toFixed(2) : "N/A";
+            const sendCurrency = payload?.sendCurrency || "N/A";
+            const receiveCurrency = payload?.receiveCurrency || "N/A";
             const status = payload?.status || "Initiated";
 
             return (
@@ -67,7 +70,7 @@ const ProposalTable: React.FC<ProposalTableProps> = ({ role = "sender" }) => {
                   <code>{proposal.contractId.substring(0, 8)}...</code>
                 </td>
                 <td>{amount}</td>
-                <td>{currency}</td>
+                <td>{sendCurrency} → {receiveCurrency}</td>
                 <td>
                   <StatusBadge status={status} />
                 </td>

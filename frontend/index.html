@@ -3,17 +3,361 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cross-Border Transaction DApp</title>
+    <title>Meridian | Cross-Border Transactions</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
-      body { background-color: #f8f9fa; }
-      .status-badge { font-size: 0.85rem; }
-      .party-sender { border-left: 4px solid #0d6efd; }
-      .party-recipient { border-left: 4px solid #198754; }
-      .party-regulator { border-left: 4px solid #dc3545; }
-      .card { transition: box-shadow 0.15s; }
-      .card:hover { box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.1); }
-      .sensitive-field { background-color: #fff3cd; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+      /* ============================================================
+         MERIDIAN THEME — Navy Blue & Warm Beige
+         ============================================================ */
+
+      :root {
+        /* Navy palette */
+        --navy-900: #0a1628;
+        --navy-800: #0f2240;
+        --navy-700: #152d50;
+        --navy-600: #1b3a65;
+        --navy-500: #24507a;
+        --navy-400: #3a6b99;
+        --navy-300: #5a8ab5;
+        --navy-200: #8ab0d4;
+        --navy-100: #c4d8eb;
+        --navy-50:  #e8f0f7;
+
+        /* Beige / warm palette */
+        --beige-900: #4a3f2f;
+        --beige-800: #6b5d4a;
+        --beige-700: #8c7a64;
+        --beige-600: #a8977f;
+        --beige-500: #c4b49a;
+        --beige-400: #d4c8b0;
+        --beige-300: #e2d8c6;
+        --beige-200: #ede6d8;
+        --beige-100: #f5f1ea;
+        --beige-50:  #faf8f4;
+
+        /* Accent colors */
+        --accent-gold: #c9a84c;
+        --accent-green: #2d8a5e;
+        --accent-red: #c44040;
+        --accent-ice: #4faec9;
+
+        /* Semantic */
+        --text-primary: var(--navy-900);
+        --text-secondary: var(--navy-600);
+        --text-muted: var(--beige-700);
+        --bg-page: var(--beige-50);
+        --bg-card: #ffffff;
+        --border-color: var(--beige-300);
+      }
+
+      * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+
+      body {
+        background-color: var(--bg-page);
+        color: var(--text-primary);
+      }
+
+      /* ---- Navbar ---- */
+      .meridian-navbar {
+        background: linear-gradient(135deg, var(--navy-900) 0%, var(--navy-700) 100%);
+        border-bottom: 3px solid var(--accent-gold);
+        padding: 0.75rem 1.5rem;
+      }
+      .meridian-navbar .navbar-brand {
+        color: #fff;
+        font-weight: 700;
+        font-size: 1.25rem;
+        letter-spacing: -0.02em;
+      }
+      .meridian-navbar .navbar-brand span {
+        color: var(--accent-gold);
+      }
+      .meridian-navbar .party-badge {
+        background: rgba(255,255,255,0.12);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff;
+        padding: 0.35rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.82rem;
+        font-weight: 500;
+      }
+      .meridian-navbar .form-select {
+        background-color: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff;
+        font-size: 0.85rem;
+        padding: 0.35rem 2rem 0.35rem 0.6rem;
+        border-radius: 6px;
+      }
+      .meridian-navbar .form-select:focus {
+        background-color: rgba(255,255,255,0.15);
+        border-color: var(--accent-gold);
+        box-shadow: 0 0 0 2px rgba(201,168,76,0.3);
+        color: #fff;
+      }
+      .meridian-navbar .form-select option {
+        background: var(--navy-800);
+        color: #fff;
+      }
+      .meridian-navbar .form-label {
+        color: rgba(255,255,255,0.6);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.15rem;
+      }
+
+      /* ---- Cards ---- */
+      .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        box-shadow: 0 1px 3px rgba(10,22,40,0.06);
+        transition: box-shadow 0.2s, transform 0.2s;
+      }
+      .card:hover {
+        box-shadow: 0 4px 12px rgba(10,22,40,0.1);
+      }
+      .card-header {
+        border-bottom: 1px solid var(--border-color);
+        border-radius: 10px 10px 0 0 !important;
+      }
+
+      /* Stat cards */
+      .stat-card {
+        text-align: center;
+        border: none;
+        border-radius: 10px;
+      }
+      .stat-card .card-body {
+        padding: 1.25rem 1rem;
+      }
+      .stat-card .stat-label {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+      }
+      .stat-card .stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1.1;
+      }
+      .stat-card.stat-active { background: var(--navy-50); }
+      .stat-card.stat-active .stat-value { color: var(--navy-600); }
+      .stat-card.stat-settled { background: #eaf6ef; }
+      .stat-card.stat-settled .stat-value { color: var(--accent-green); }
+      .stat-card.stat-frozen { background: #fceaea; }
+      .stat-card.stat-frozen .stat-value { color: var(--accent-red); }
+      .stat-card.stat-total { background: var(--beige-100); }
+      .stat-card.stat-total .stat-value { color: var(--navy-800); }
+
+      /* ---- Tables ---- */
+      .table {
+        --bs-table-bg: transparent;
+        font-size: 0.88rem;
+      }
+      .table thead th {
+        background: var(--navy-800);
+        color: #fff;
+        font-weight: 600;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.7rem 0.75rem;
+        border: none;
+      }
+      .table thead th:first-child { border-radius: 8px 0 0 0; }
+      .table thead th:last-child { border-radius: 0 8px 0 0; }
+      .table tbody tr {
+        border-bottom: 1px solid var(--beige-200);
+      }
+      .table tbody tr:hover {
+        background: var(--beige-100) !important;
+      }
+      .table tbody td {
+        padding: 0.65rem 0.75rem;
+        vertical-align: middle;
+      }
+      .table-striped > tbody > tr:nth-of-type(odd) > * {
+        background-color: var(--beige-50);
+      }
+
+      /* ---- Buttons ---- */
+      .btn-primary {
+        background: var(--navy-700);
+        border-color: var(--navy-700);
+        font-weight: 500;
+      }
+      .btn-primary:hover, .btn-primary:focus {
+        background: var(--navy-600);
+        border-color: var(--navy-600);
+      }
+      .btn-danger {
+        background: var(--accent-red);
+        border-color: var(--accent-red);
+      }
+      .btn-danger:hover { background: #b33636; border-color: #b33636; }
+      .btn-success {
+        background: var(--accent-green);
+        border-color: var(--accent-green);
+      }
+      .btn-success:hover { background: #24704d; border-color: #24704d; }
+      .btn-warning {
+        background: var(--accent-gold);
+        border-color: var(--accent-gold);
+        color: #fff;
+      }
+      .btn-warning:hover { background: #b89540; border-color: #b89540; color: #fff; }
+      .btn-outline-primary {
+        color: var(--navy-700);
+        border-color: var(--navy-400);
+      }
+      .btn-outline-primary:hover {
+        background: var(--navy-700);
+        border-color: var(--navy-700);
+        color: #fff;
+      }
+
+      /* ---- Badges ---- */
+      .badge.bg-primary { background-color: var(--navy-600) !important; }
+      .badge.bg-success { background-color: var(--accent-green) !important; }
+      .badge.bg-danger  { background-color: var(--accent-red) !important; }
+      .badge.bg-warning { background-color: var(--accent-gold) !important; color: #fff !important; }
+      .badge.bg-secondary { background-color: var(--beige-600) !important; }
+      .badge.bg-info { background-color: var(--accent-ice) !important; }
+
+      /* ---- Alerts ---- */
+      .alert-info {
+        background: var(--navy-50);
+        border-color: var(--navy-100);
+        color: var(--navy-800);
+      }
+      .alert-warning {
+        background: #fdf6e3;
+        border-color: var(--beige-400);
+        color: var(--beige-900);
+      }
+      .alert-danger {
+        background: #fceaea;
+        border-color: #e8b0b0;
+        color: #8a2c2c;
+      }
+      .alert-secondary, .alert-light {
+        background: var(--beige-100);
+        border-color: var(--beige-300);
+        color: var(--text-primary);
+      }
+
+      /* ---- Forms ---- */
+      .form-control, .form-select {
+        border-color: var(--beige-300);
+        border-radius: 6px;
+        font-size: 0.9rem;
+      }
+      .form-control:focus, .form-select:focus {
+        border-color: var(--navy-400);
+        box-shadow: 0 0 0 3px rgba(36,80,122,0.12);
+      }
+      .form-label {
+        font-weight: 500;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
+
+      /* ---- Section headings ---- */
+      h2 {
+        color: var(--navy-800);
+        font-weight: 700;
+        font-size: 1.6rem;
+        letter-spacing: -0.02em;
+      }
+      h4 {
+        color: var(--navy-700);
+        font-weight: 600;
+        font-size: 1.15rem;
+      }
+      h5 { font-weight: 600; }
+      h6 {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      /* ---- Progress bar ---- */
+      .progress {
+        background: var(--beige-200);
+        border-radius: 6px;
+      }
+      .progress-bar.bg-success { background-color: var(--accent-green) !important; }
+      .progress-bar.bg-warning { background-color: var(--accent-gold) !important; }
+      .progress-bar.bg-danger  { background-color: var(--accent-red) !important; }
+
+      /* ---- Compliance panel header ---- */
+      .compliance-header {
+        background: linear-gradient(135deg, var(--navy-800) 0%, var(--navy-600) 100%);
+        color: #fff;
+        border-radius: 10px 10px 0 0;
+        padding: 0.85rem 1.25rem;
+      }
+      .compliance-header h5 { color: #fff; margin: 0; }
+
+      /* ---- Party borders ---- */
+      .party-sender { border-left: 4px solid var(--navy-500); }
+      .party-recipient { border-left: 4px solid var(--accent-green); }
+      .party-regulator { border-left: 4px solid var(--accent-gold); }
+
+      /* ---- Sensitive fields ---- */
+      .sensitive-field {
+        background-color: var(--beige-200);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 0.85rem;
+      }
+
+      /* ---- Misc ---- */
+      .text-muted { color: var(--text-muted) !important; }
+
+      .clickable-id {
+        cursor: pointer;
+        color: var(--navy-500);
+        text-decoration: underline;
+        text-decoration-style: dotted;
+        text-underline-offset: 2px;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 0.82rem;
+      }
+      .clickable-id:hover {
+        color: var(--navy-700);
+        text-decoration-style: solid;
+      }
+
+      .selected-row {
+        background: var(--navy-50) !important;
+        border-left: 3px solid var(--navy-500);
+      }
+
+      /* Modal overlay */
+      .modal.d-block { background: rgba(10,22,40,0.6) !important; }
+      .modal-header {
+        background: var(--navy-800);
+        color: #fff;
+        border-bottom: 2px solid var(--accent-gold);
+      }
+      .modal-header .modal-title { color: #fff; }
+      .modal-header .btn-close { filter: invert(1); }
+
+      /* ---- Scrollbar ---- */
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: var(--beige-100); }
+      ::-webkit-scrollbar-thumb { background: var(--beige-400); border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--beige-600); }
     </style>
   </head>
   <body>

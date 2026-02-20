@@ -4,6 +4,20 @@ import { usePartyStore } from "../stores/partyStore";
 import { CreateProposalRequest } from "../../../backend/src/types";
 import { generateCommandId } from "../utils/commandId";
 
+async function sha256(message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return hashHex;
+}
+
 const ProposalForm: React.FC = () => {
   const { createProposal } = useProposals();
   const { currentParty } = usePartyStore();
@@ -12,14 +26,21 @@ const ProposalForm: React.FC = () => {
     recipient: "BobLtd_London",
     regulator: "MAS_Regulator",
     amount: "1000",
-    currency: "USD",
+    sendCurrency: "USD",
+    receiveCurrency: "GBP",
+    // Sender details
     senderName: "Alice Corp",
     senderAccount: "ACC001",
     senderBankSwift: "ALICESG",
     senderCountry: "Singapore",
     senderTaxId: "TAX001",
+    // Recipient details
     recipientName: "Bob Ltd",
-    recipientBic: "WESTGB2L",
+    recipientAccount: "GB82-WEST-1234-5698-7654-32",
+    recipientBankSwift: "WESTGB2L",
+    recipientCountry: "United Kingdom",
+    recipientTaxId: "GB-987654321",
+    // Declaration
     purposeOfPayment: "International trade",
     sourceOfFunds: "Business operations",
   });
@@ -42,6 +63,8 @@ const ProposalForm: React.FC = () => {
         throw new Error("No party selected");
       }
 
+      const hash = await sha256(formData.senderAccount);
+
       const proposal: CreateProposalRequest = {
         recipient: formData.recipient,
         regulator: formData.regulator,
@@ -53,14 +76,21 @@ const ProposalForm: React.FC = () => {
           senderCountry: formData.senderCountry,
           senderTaxId: formData.senderTaxId,
         },
-        recipientName: formData.recipientName,
-        recipientBic: formData.recipientBic,
+        recipientInfo: {
+          recipientName: formData.recipientName,
+          recipientAccount: formData.recipientAccount,
+          recipientBankSwift: formData.recipientBankSwift,
+          recipientCountry: formData.recipientCountry,
+          recipientTaxId: formData.recipientTaxId,
+          recipientAccountHash: hash
+        },
         declaration: {
           purposeOfPayment: formData.purposeOfPayment,
           sourceOfFunds: formData.sourceOfFunds,
         },
         amount: formData.amount,
-        currency: formData.currency,
+        sendCurrency: formData.sendCurrency,
+        receiveCurrency: formData.receiveCurrency,
       };
 
       await createProposal(proposal);
@@ -70,14 +100,18 @@ const ProposalForm: React.FC = () => {
         recipient: "BobLtd_London",
         regulator: "MAS_Regulator",
         amount: "1000",
-        currency: "USD",
+        sendCurrency: "USD",
+        receiveCurrency: "GBP",
         senderName: "Alice Corp",
         senderAccount: "ACC001",
         senderBankSwift: "ALICESG",
         senderCountry: "Singapore",
         senderTaxId: "TAX001",
         recipientName: "Bob Ltd",
-        recipientBic: "WESTGB2L",
+        recipientAccount: "GB82-WEST-1234-5698-7654-32",
+        recipientBankSwift: "WESTGB2L",
+        recipientCountry: "United Kingdom",
+        recipientTaxId: "GB-987654321",
         purposeOfPayment: "International trade",
         sourceOfFunds: "Business operations",
       });
@@ -99,7 +133,7 @@ const ProposalForm: React.FC = () => {
         {/* Basic Transaction Info */}
         <div className="col-md-6">
           <div className="mb-3">
-            <label className="form-label">Recipient</label>
+            <label className="form-label">Recipient Party</label>
             <select
               name="recipient"
               value={formData.recipient}
@@ -138,12 +172,12 @@ const ProposalForm: React.FC = () => {
             />
           </div>
         </div>
-        <div className="col-md-6">
+        <div className="col-md-3">
           <div className="mb-3">
-            <label className="form-label">Currency</label>
+            <label className="form-label">Send Currency</label>
             <select
-              name="currency"
-              value={formData.currency}
+              name="sendCurrency"
+              value={formData.sendCurrency}
               onChange={handleChange}
               className="form-select"
             >
@@ -151,6 +185,30 @@ const ProposalForm: React.FC = () => {
               <option value="EUR">EUR</option>
               <option value="GBP">GBP</option>
               <option value="JPY">JPY</option>
+              <option value="CHF">CHF</option>
+              <option value="SGD">SGD</option>
+              <option value="HKD">HKD</option>
+              <option value="AED">AED</option>
+            </select>
+          </div>
+        </div>
+        <div className="col-md-3">
+          <div className="mb-3">
+            <label className="form-label">Receive Currency</label>
+            <select
+              name="receiveCurrency"
+              value={formData.receiveCurrency}
+              onChange={handleChange}
+              className="form-select"
+            >
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="JPY">JPY</option>
+              <option value="CHF">CHF</option>
+              <option value="SGD">SGD</option>
+              <option value="HKD">HKD</option>
+              <option value="AED">AED</option>
             </select>
           </div>
         </div>
@@ -162,95 +220,66 @@ const ProposalForm: React.FC = () => {
         <div className="col-md-6">
           <div className="mb-3">
             <label className="form-label">Name</label>
-            <input
-              type="text"
-              name="senderName"
-              value={formData.senderName}
-              onChange={handleChange}
-              className="form-control"
-            />
+            <input type="text" name="senderName" value={formData.senderName} onChange={handleChange} className="form-control" />
           </div>
         </div>
         <div className="col-md-6">
           <div className="mb-3">
             <label className="form-label">Account Number</label>
-            <input
-              type="text"
-              name="senderAccount"
-              value={formData.senderAccount}
-              onChange={handleChange}
-              className="form-control"
-            />
+            <input type="text" name="senderAccount" value={formData.senderAccount} onChange={handleChange} className="form-control" />
           </div>
         </div>
         <div className="col-md-6">
           <div className="mb-3">
             <label className="form-label">Bank SWIFT Code</label>
-            <input
-              type="text"
-              name="senderBankSwift"
-              value={formData.senderBankSwift}
-              onChange={handleChange}
-              className="form-control"
-            />
+            <input type="text" name="senderBankSwift" value={formData.senderBankSwift} onChange={handleChange} className="form-control" />
           </div>
         </div>
         <div className="col-md-6">
           <div className="mb-3">
             <label className="form-label">Country</label>
-            <input
-              type="text"
-              name="senderCountry"
-              value={formData.senderCountry}
-              onChange={handleChange}
-              className="form-control"
-            />
+            <input type="text" name="senderCountry" value={formData.senderCountry} onChange={handleChange} className="form-control" />
           </div>
         </div>
         <div className="col-md-6">
           <div className="mb-3">
             <label className="form-label">Tax ID</label>
-            <input
-              type="text"
-              name="senderTaxId"
-              value={formData.senderTaxId}
-              onChange={handleChange}
-              className="form-control"
-            />
+            <input type="text" name="senderTaxId" value={formData.senderTaxId} onChange={handleChange} className="form-control" />
           </div>
         </div>
       </div>
 
-      {/* Recipient (Public Info Only) */}
-      <h6 className="mt-4 mb-3">Recipient (Public Info Only)</h6>
-      <div className="alert alert-info py-2 mb-3">
-        <small>You only need the institution name and BIC code. The recipient's bank details are resolved automatically and kept private.</small>
-      </div>
+      {/* Recipient Details */}
+      <h6 className="mt-4 mb-3">Recipient Details</h6>
       <div className="row">
         <div className="col-md-6">
           <div className="mb-3">
-            <label className="form-label">Institution Name</label>
-            <input
-              type="text"
-              name="recipientName"
-              value={formData.recipientName}
-              onChange={handleChange}
-              className="form-control"
-              placeholder="e.g. Bob Ltd"
-            />
+            <label className="form-label">Name</label>
+            <input type="text" name="recipientName" value={formData.recipientName} onChange={handleChange} className="form-control" />
           </div>
         </div>
         <div className="col-md-6">
           <div className="mb-3">
-            <label className="form-label">BIC Code</label>
-            <input
-              type="text"
-              name="recipientBic"
-              value={formData.recipientBic}
-              onChange={handleChange}
-              className="form-control"
-              placeholder="e.g. WESTGB2L"
-            />
+            <label className="form-label">Account Number</label>
+            <input type="text" name="recipientAccount" value={formData.recipientAccount} onChange={handleChange} className="form-control" />
+          </div>
+        </div>
+        <div className="col-md-6">
+          <div className="mb-3">
+            <label className="form-label">Bank SWIFT Code</label>
+            <input type="text" name="recipientBankSwift" value={formData.recipientBankSwift} onChange={handleChange} className="form-control" />
+          </div>
+        </div>
+        <div className="col-md-6">
+          <div className="mb-3">
+            <label className="form-label">Country</label>
+            <input type="text" name="recipientCountry" value={formData.recipientCountry} onChange={handleChange} className="form-control" />
+          </div>
+        </div>
+        <div className="col-md-6">
+          <div className="mb-3">
+            <label className="form-label">Tax ID</label>
+            <input type="text" name="recipientTaxId" value={formData.recipientTaxId} onChange={handleChange} className="form-control" />
           </div>
         </div>
       </div>
@@ -258,7 +287,7 @@ const ProposalForm: React.FC = () => {
       {/* Sender Declaration */}
       <h6 className="mt-4 mb-3">Your Declaration</h6>
       <div className="alert alert-secondary py-2 mb-3">
-        <small>Declare the purpose and source of funds. Compliance screening (risk score, sanctions, PEP checks) is performed automatically by the regulator's service.</small>
+        <small>Declare the purpose and source of funds. Compliance screening (risk score, sanctions, PEP checks) is performed automatically by the regulator.</small>
       </div>
       <div className="row">
         <div className="col-md-6">

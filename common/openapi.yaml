@@ -283,7 +283,7 @@ components:
 
     CreateProposalRequest:
       type: object
-      required: [recipient, regulator, txId, senderInfo, recipientInfo, compliance, amount, currency]
+      required: [recipient, regulator, txId, senderInfo, recipientInfo, declaration, amount, currency]
       properties:
         recipient:
           type: string
@@ -295,8 +295,8 @@ components:
           $ref: '#/components/schemas/SenderDetails'
         recipientInfo:
           $ref: '#/components/schemas/RecipientDetails'
-        compliance:
-          $ref: '#/components/schemas/ComplianceData'
+        declaration:
+          $ref: '#/components/schemas/SenderDeclaration'
         amount:
           type: string
         currency:
@@ -333,14 +333,19 @@ components:
         recipientTaxId:
           type: string
 
-    ComplianceData:
+    SenderDeclaration:
       type: object
-      required: [purposeOfPayment, sourceOfFunds, riskScore, sanctionsChecked, pep_check, amlNotes]
+      required: [purposeOfPayment, sourceOfFunds]
       properties:
         purposeOfPayment:
           type: string
         sourceOfFunds:
           type: string
+
+    ComplianceScreening:
+      type: object
+      required: [riskScore, sanctionsChecked, pep_check, amlNotes]
+      properties:
         riskScore:
           type: integer
           minimum: 0

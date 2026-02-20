@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import api from "../api";
 import { usePartyStore } from "./partyStore";
 import { useToast } from "./toastStore";
-import { ContractWrapper, ApproveRequest, RejectRequest } from "../../../backend/src/types";
+import { ContractWrapper } from "../../../backend/src/types";
 
 export interface Transaction extends ContractWrapper {
   // Extends base contract wrapper
@@ -13,8 +13,7 @@ interface TransactionContextType {
   loading: boolean;
   error: string | null;
   fetchTransactions: () => Promise<void>;
-  approveTransaction: (txId: string, senderViewCid: string, recipientViewCid: string) => Promise<void>;
-  rejectTransaction: (txId: string, reason: string) => Promise<void>;
+  freezeTransaction: (txId: string) => Promise<void>;
   settleTransaction: (txId: string) => Promise<void>;
   getTransactionById: (id: string) => Transaction | undefined;
 }
@@ -53,41 +52,19 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     fetchTransactions();
   }, [currentParty, fetchTransactions]);
 
-  const approveTransaction = useCallback(
-    async (txId: string, senderViewCid: string, recipientViewCid: string) => {
+  const freezeTransaction = useCallback(
+    async (txId: string) => {
       if (!currentParty) {
         displayError("No party selected");
         return;
       }
 
       try {
-        const data: ApproveRequest = { senderViewCid, recipientViewCid };
-        await api.approveTransaction(currentParty.id, txId, data);
-        displaySuccess("Transaction approved successfully");
+        await api.freezeTransaction(currentParty.id, txId);
+        displaySuccess("Transaction frozen successfully");
         await fetchTransactions();
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to approve transaction";
-        displayError(message);
-        throw err;
-      }
-    },
-    [currentParty, displaySuccess, displayError, fetchTransactions]
-  );
-
-  const rejectTransaction = useCallback(
-    async (txId: string, reason: string) => {
-      if (!currentParty) {
-        displayError("No party selected");
-        return;
-      }
-
-      try {
-        const data: RejectRequest = { reason };
-        await api.rejectTransaction(currentParty.id, txId, data);
-        displaySuccess("Transaction rejected successfully");
-        await fetchTransactions();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to reject transaction";
+        const message = err instanceof Error ? err.message : "Failed to freeze transaction";
         displayError(message);
         throw err;
       }
@@ -124,8 +101,7 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         loading,
         error,
         fetchTransactions,
-        approveTransaction,
-        rejectTransaction,
+        freezeTransaction,
         settleTransaction,
         getTransactionById,
       }}

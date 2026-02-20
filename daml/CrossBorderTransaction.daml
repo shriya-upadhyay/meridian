@@ -33,29 +33,29 @@ data Currency = USD | EUR | GBP | JPY | CHF | SGD | HKD | AED
 
 data TxStatus
   = Initiated        -- Sender has created the transaction
-  | ComplianceCheck  -- Regulator is reviewing
-  | Approved         -- Regulator approved
-  | Rejected         -- Regulator rejected
+  | Approved         -- Ready for settlement (set when recipient accepts)
   | Settled          -- Funds transferred
+  | Frozen           -- Regulator froze the transaction
   | Cancelled        -- Cancelled by sender
   deriving (Eq, Show)
 
 data SenderDetails = SenderDetails
   with
     senderName        : Text
-    senderAccount     : Text    -- Full account number (sensitive)
+    senderAccount     : Text    
     senderBankSwift   : Text
     senderCountry     : Text
-    senderTaxId       : Text    -- Sensitive - only sender & regulator
+    senderTaxId       : Text    
   deriving (Eq, Show)
 
 data RecipientDetails = RecipientDetails
   with
     recipientName      : Text
-    recipientAccount   : Text   -- Full account number (sensitive)
+    recipientAccount   : Text  
     recipientBankSwift : Text
     recipientCountry   : Text
-    recipientTaxId     : Text   -- Sensitive - only recipient & regulator
+    recipientTaxId     : Text 
+    recipientAccountHash : Text  
   deriving (Eq, Show)
 
 -- What the SENDER declares when creating the proposal.
@@ -99,12 +99,14 @@ template SenderView
   with
     sender         : Party
     regulator      : Party
-    txId           : Text
+    txId            : Text
     senderInfo     : SenderDetails
-    amount         : Decimal
-    currency       : Currency
-    recipientName  : Text          -- Only the name, not full details
-    recipientCountry : Text
+    amount          : Decimal
+    sendCurrency    : Currency    -- Currency sender is sending
+    receiveCurrency : Currency    -- Currency recipient receives
+    recipientName  : Text
+    recipientCountry: Text
+    recipientAccountHash : Text
     status         : TxStatus
     fxRate           : FxRate
     createdAt      : Time
@@ -115,21 +117,13 @@ template SenderView
     -- Sender can see their own full details + transaction metadata
     -- Regulator can observe (for audit/compliance)
 
-    -- Sender can request cancellation (only if not yet settled)
+    -- Sender can request cancellation (only if not yet settled/frozen)
     choice RequestCancellation : ContractId SenderView
       controller sender
       do
         assertMsg "Cannot cancel a settled transaction" (status /= Settled)
-        assertMsg "Cannot cancel a rejected transaction" (status /= Rejected)
+        assertMsg "Cannot cancel a frozen transaction" (status /= Frozen)
         create this with status = Cancelled
-
-    -- Regulator can update status (used during Approve/Reject flow)
-    choice UpdateSenderViewStatus : ContractId SenderView
-      with
-        newStatus : TxStatus
-      controller regulator
-      do
-        create this with status = newStatus
 
 
 -- =============================================================================
@@ -145,8 +139,9 @@ template RecipientView
     txId            : Text
     recipientInfo   : RecipientDetails
     amount          : Decimal
-    currency        : Currency
-    senderName      : Text          -- Only the name, not full details
+    sendCurrency    : Currency    -- Currency sender is sending
+    receiveCurrency : Currency    -- Currency recipient receives
+    senderName      : Text
     senderCountry   : Text
     status          : TxStatus
     fxRate          : FxRate
@@ -162,20 +157,12 @@ template RecipientView
         assertMsg "Transaction must be settled to acknowledge" (status == Settled)
         create this  -- Could add an "acknowledged" flag
 
-    -- Regulator can update status (used during Approve/Reject flow)
-    choice UpdateRecipientViewStatus : ContractId RecipientView
-      with
-        newStatus : TxStatus
-      controller regulator
-      do
-        create this with status = newStatus
-
 
 -- =============================================================================
 -- 3. REGULATOR VIEW (Visible to: Regulator ONLY)
 -- =============================================================================
 -- The regulator sees EVERYTHING: full sender details, full recipient details,
--- compliance/AML data, and can approve or reject.
+-- compliance/AML data. Can flag suspicious transactions with notes.
 
 template RegulatorView
   with
@@ -186,7 +173,8 @@ template RegulatorView
     declaration     : SenderDeclaration   -- What sender declared
     screening       : ComplianceScreening -- Regulator's screening results
     amount          : Decimal
-    currency        : Currency
+    sendCurrency    : Currency
+    receiveCurrency : Currency
     status          : TxStatus
     fxRate          : FxRate
     createdAt       : Time
@@ -216,55 +204,31 @@ template CrossBorderTx
     regulator       : Party
     txId            : Text
     amount          : Decimal
-    currency        : Currency
-    senderName      : Text       -- Non-sensitive (public in the tx)
+    sendCurrency    : Currency
+    receiveCurrency : Currency
+    senderName      : Text
     senderCountry   : Text
-    recipientName   : Text       -- Non-sensitive
+    recipientName   : Text
     recipientCountry: Text
     status          : TxStatus
     fxRate          : FxRate
+    recipientAccountHash : Text
     createdAt       : Time
   where
     signatory sender
     observer recipient, regulator
 
     -- =========================================================================
-    -- REGULATOR: Approve the transaction
+    -- REGULATOR: Freeze a suspicious transaction
     -- =========================================================================
-    -- ContractIds for the view contracts are passed in since contract keys
-    -- are not supported in Canton SDK 3.4+.
-    choice Approve : (ContractId CrossBorderTx, ContractId SenderView, ContractId RecipientView)
-      with
-        senderViewCid    : ContractId SenderView
-        recipientViewCid : ContractId RecipientView
+    -- The regulator monitors transactions and can freeze any that haven't
+    -- been settled yet. A frozen transaction cannot be settled by the sender.
+    choice Freeze : ContractId CrossBorderTx
       controller regulator
       do
-        assertMsg "Transaction must be in ComplianceCheck" (status == ComplianceCheck)
-
-        -- Update main contract
-        newTx <- create this with status = Approved
-
-        -- Update sender's view via its own choice (sender is signatory, so
-        -- exercising a choice on SenderView archives it with proper auth)
-        newSv <- exercise senderViewCid UpdateSenderViewStatus with
-          newStatus = Approved
-
-        -- Update recipient's view via its own choice
-        newRv <- exercise recipientViewCid UpdateRecipientViewStatus with
-          newStatus = Approved
-
-        return (newTx, newSv, newRv)
-
-    -- =========================================================================
-    -- REGULATOR: Reject the transaction
-    -- =========================================================================
-    choice Reject : ContractId CrossBorderTx
-      with
-        reason : Text
-      controller regulator
-      do
-        assertMsg "Transaction must be in ComplianceCheck" (status == ComplianceCheck)
-        create this with status = Rejected
+        assertMsg "Cannot freeze a settled transaction" (status /= Settled)
+        assertMsg "Transaction is already frozen" (status /= Frozen)
+        create this with status = Frozen
 
     -- =========================================================================
     -- SENDER: Settle (simulate fund transfer after approval)
@@ -279,17 +243,13 @@ template CrossBorderTx
 -- =============================================================================
 -- 5. TRANSACTION PROPOSAL (Initiation Flow)
 -- =============================================================================
--- The sender creates a proposal with:
+-- The sender creates a proposal with all details upfront:
 --   - Their own bank details (SenderDetails)
+--   - The recipient's bank details (RecipientDetails)
 --   - A declaration of purpose/source of funds (SenderDeclaration)
---   - Recipient's public info only (institution name + BIC code)
 --
--- What the sender does NOT provide:
---   - Recipient's bank details → resolved at acceptance from BIC
---   - Compliance screening → produced by regulator's service at acceptance
---
--- This ensures the sender NEVER sees the recipient's sensitive bank details,
--- and compliance assessments are always done by the regulator — not self-reported.
+-- Compliance screening is NOT on the proposal — it's produced by the
+-- regulator's automated screening service when the recipient accepts.
 
 template CrossBorderTxProposal
   with
@@ -298,12 +258,12 @@ template CrossBorderTxProposal
     regulator       : Party
     txId            : Text
     senderInfo      : SenderDetails
-    recipientName   : Text            -- Public: institution name
-    recipientBic    : Text            -- Public: BIC/SWIFT code
-    declaration     : SenderDeclaration  -- Sender's own declaration (purpose, source of funds)
+    recipientInfo   : RecipientDetails
+    declaration     : SenderDeclaration 
     amount          : Decimal
+    sendCurrency    : Currency
+    receiveCurrency : Currency
     fxRate          : FxRate
-    currency        : Currency
     createdAt       : Time
   where
     signatory sender, regulator
@@ -312,45 +272,45 @@ template CrossBorderTxProposal
     -- =========================================================================
     -- RECIPIENT: Accept the proposal → creates all view contracts
     -- =========================================================================
-    -- The recipient (or their backend) provides full RecipientDetails at
-    -- acceptance time (resolved off-chain from the BIC code).
-    -- The compliance screening is also provided at acceptance time — it comes
-    -- from the regulator's automated screening service, NOT from the sender.
+    -- Compliance screening is provided at acceptance time — it comes from
+    -- the regulator's automated screening service, NOT from the sender.
     choice AcceptProposal : (ContractId CrossBorderTx, ContractId SenderView, ContractId RecipientView, ContractId RegulatorView)
       with
-        recipientInfo : RecipientDetails     -- Resolved from BIC by identity service
-        screening     : ComplianceScreening  -- From regulator's screening service
+        screening     : ComplianceScreening  
       controller recipient
       do
         -- 1. Main contract (shared, non-sensitive fields only)
+        --    Status is Approved immediately — no regulator gate before settlement
         txCid <- create CrossBorderTx with
           sender; recipient; regulator; txId
-          amount; currency
+          amount; sendCurrency; receiveCurrency
           senderName     = senderInfo.senderName
           senderCountry  = senderInfo.senderCountry
           recipientName  = recipientInfo.recipientName
           recipientCountry = recipientInfo.recipientCountry
-          status = ComplianceCheck
+          recipientAccountHash = recipientInfo.recipientAccountHash
+          status = Approved
           fxRate = fxRate
           createdAt
 
         -- 2. Sender view (sender sees own sensitive data + recipient public info)
         svCid <- create SenderView with
           sender; regulator; txId; senderInfo
-          amount; currency
+          amount; sendCurrency; receiveCurrency
           recipientName = recipientInfo.recipientName
           recipientCountry = recipientInfo.recipientCountry
-          status = ComplianceCheck
+          recipientAccountHash = recipientInfo.recipientAccountHash
+          status = Approved
           fxRate = fxRate
           createdAt
 
         -- 3. Recipient view (recipient sees own sensitive data + sender public info)
         rvCid <- create RecipientView with
           recipient; regulator; txId; recipientInfo
-          amount; currency
+          amount; sendCurrency; receiveCurrency
           senderName = senderInfo.senderName
           senderCountry = senderInfo.senderCountry
-          status = ComplianceCheck
+          status = Approved
           fxRate = fxRate
           createdAt
 
@@ -358,8 +318,8 @@ template CrossBorderTxProposal
         regCid <- create RegulatorView with
           regulator; txId; senderInfo; recipientInfo
           declaration; screening
-          amount; currency
-          status = ComplianceCheck
+          amount; sendCurrency; receiveCurrency
+          status = Approved
           fxRate = fxRate
           createdAt
 
@@ -398,6 +358,7 @@ setup = script do
       recipientBankSwift = "WESTGB2L"
       recipientCountry   = "United Kingdom"
       recipientTaxId     = "GB-987654321"                  -- Sensitive!
+      recipientAccountHash = "XXXXX"
 
     -- What the sender declares (they know why they're sending money)
     senderDecl = SenderDeclaration with
@@ -432,31 +393,24 @@ setup = script do
       regulator = regulatorParty
       txId
       senderInfo    = senderDeets
-      recipientName = "Bob Ltd"         -- Public info only
-      recipientBic  = "WESTGB2L"        -- Public BIC code
-      declaration   = senderDecl        -- Sender's own declaration only
+      recipientInfo = recipientDeets
+      declaration   = senderDecl
       amount        = 250000.00
-      currency      = USD
+      sendCurrency  = USD
+      receiveCurrency = GBP
       fxRate = fxRate
       createdAt     = now
 
-  -- Step 2: Recipient accepts → provides their own bank details (resolved
-  --         off-chain from BIC by the identity service). This creates the
-  --         fan-out into per-party view contracts.
-  (txCid, svCid, rvCid, regCid) <- submit recipientParty do
+  -- Step 2: Recipient accepts → creates all view contracts with status Approved.
+  --         No regulator gate — sender can settle immediately.
+  --         Regulator monitors post-settlement and can freeze if suspicious.
+  (txCid, _svCid, _rvCid, _regCid) <- submit recipientParty do
     exerciseCmd proposalCid AcceptProposal with
-      recipientInfo = recipientDeets
-      screening     = screeningResult     -- From regulator's screening service
+      screening = screeningResult     -- From regulator's screening service
 
-  -- Step 3: Regulator reviews and approves (passing view ContractIds)
-  (txCid2, svCid2, rvCid2) <- submit regulatorParty do
-    exerciseCmd txCid Approve with
-      senderViewCid = svCid
-      recipientViewCid = rvCid
-
-  -- Step 4: Sender settles
+  -- Step 3: Sender settles (no regulator approval needed)
   _finalTx <- submit senderParty do
-    exerciseCmd txCid2 Settle
+    exerciseCmd txCid Settle
 
   -- ==========================================================================
   -- VISIBILITY SUMMARY (what Canton's ledger API shows each party):

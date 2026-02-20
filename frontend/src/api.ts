@@ -1,4 +1,4 @@
-import { PartyInfo, ContractWrapper, CreateProposalRequest, ApproveRequest, RejectRequest, FlagRequest } from '../../backend/src/types';
+import { PartyInfo, ContractWrapper, CreateProposalRequest, FlagRequest } from '../../backend/src/types';
 
 const API_BASE_URL = '/api';
 
@@ -70,20 +70,8 @@ export const api = {
     return apiCall('GET', '/transactions', party);
   },
 
-  async approveTransaction(
-    party: string,
-    contractId: string,
-    data: ApproveRequest
-  ): Promise<ContractWrapper> {
-    return apiCall('POST', `/transactions/${contractId}/approve`, party, data);
-  },
-
-  async rejectTransaction(
-    party: string,
-    contractId: string,
-    data: RejectRequest
-  ): Promise<void> {
-    return apiCall('POST', `/transactions/${contractId}/reject`, party, data);
+  async freezeTransaction(party: string, contractId: string): Promise<void> {
+    return apiCall('POST', `/transactions/${contractId}/freeze`, party);
   },
 
   async settleTransaction(party: string, contractId: string): Promise<void> {
