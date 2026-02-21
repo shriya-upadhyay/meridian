@@ -13,7 +13,9 @@ router.get('/', async (req: Request, res: Response) => {
 
   try {
     const contracts = await ledger.queryContracts(party, 'CrossBorderTx');
-    res.json(contracts);
+    // Filter out Proposed-status contracts (those are shown via the proposals endpoint)
+    const transactions = contracts.filter((c: any) => c.payload?.status !== 'Proposed');
+    res.json(transactions);
   } catch (error: any) {
     console.error('Error listing transactions:', error.message);
     res.status(500).json({ error: error.message });
